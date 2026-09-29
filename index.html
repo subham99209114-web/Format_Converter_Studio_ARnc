@@ -621,98 +621,88 @@ function rawDngBlobFromCanvas(canvas){
  let q=stripOffset;for(let i=0;i<rgba.length;i+=4){u[q++]=rgba[i];u[q++]=rgba[i+1];u[q++]=rgba[i+2]}
  return new Blob([buf],{type:'image/x-adobe-dng'});
 }
-let heicWorkerPromise=null;
-function heicWorker(){
- if(heicWorkerPromise)return heicWorkerPromise;
- heicWorkerPromise=new Promise((resolve,reject)=>{
-  const code=`
-   let encoderPromise=null;
-   async function getEncoder(){
-    if(!encoderPromise){
-     encoderPromise=(async()=>{
-      const mod=await import('https://cdn.jsdelivr.net/npm/@pbk20191/icodec@0.9.3/+esm');
-      const heic=mod.heic||mod.default?.heic;
-      if(!heic||typeof heic.loadEncoder!=='function'||typeof heic.encode!=='function')
-       throw new Error('HEIC encoder module is unavailable.');
-      await heic.loadEncoder('https://cdn.jsdelivr.net/npm/@pbk20191/icodec@0.9.3/heic-enc.wasm');
-      return heic;
-     })();
-    }
-    return encoderPromise;
-   }
-   getEncoder().then(()=>self.postMessage({ready:true})).catch(err=>self.postMessage({ready:false,error:err&&err.message?err.message:String(err)}));
-   self.onmessage=async e=>{
-    try{
-     const {rgba,width,height}=e.data;
-     const heic=await getEncoder();
-     const image={data:new Uint8ClampedArray(rgba),width,height};
-     const out=heic.encode(image);
-     if(!out||!out.length)throw new Error('HEIC encoder returned empty data.');
-     const copy=new Uint8Array(out.length);copy.set(out);
-     self.postMessage({result:true,buffer:copy.buffer},[copy.buffer]);
-    }catch(err){self.postMessage({result:false,error:err&&err.message?err.message:String(err)});}
-   };
-  `;
-  const blob=new Blob([code],{type:'text/javascript'});
-  const url=URL.createObjectURL(blob);
-  const worker=new Worker(url,{type:'module'});
-  URL.revokeObjectURL(url);
-  worker.onmessage=e=>{
-   if(e.data&&e.data.ready){
-    if(e.data.ready){worker.onmessage=null;resolve(worker);}
-    else {worker.terminate();reject(new Error(e.data.error||'HEIC encoder failed to initialize.'));}
+let heicWorker=null;
+let heicWorkerReady=null;
+let heicRequestId=0;
+const heicPending=new Map();
+
+function getHeicWorker(){
+ if(heicWorker)return heicWorker;
+ const workerCode=`
+  import { heic } from 'https://cdn.jsdelivr.net/npm/@pbk20191/icodec@0.9.3/+esm';
+  let encoderReady=null,decoderReady=null;
+  self.onmessage=async(e)=>{
+   const {id,rgba,width,height}=e.data||{};
+   try{
+    if(!rgba||!width||!height)throw new Error('Invalid image data sent to HEIC encoder.');
+    if(!encoderReady)encoderReady=heic.loadEncoder();
+    await encoderReady;
+    const input=new ImageData(new Uint8ClampedArray(rgba),width,height);
+    const encoded=heic.encode(input);
+    if(!(encoded instanceof Uint8Array)||encoded.length<32)throw new Error('HEIC encoder returned incomplete data.');
+    if(!decoderReady)decoderReady=heic.loadDecoder();
+    await decoderReady;
+    const decoded=heic.decode(encoded);
+    if(!decoded||decoded.width!==width||decoded.height!==height)
+      throw new Error('HEIC round-trip validation failed.');
+    self.postMessage({id,ok:true,bytes:encoded.buffer},[encoded.buffer]);
+   }catch(err){
+    self.postMessage({id,ok:false,error:String(err&&err.message?err.message:err)});
    }
   };
-  worker.onerror=e=>{worker.terminate();reject(new Error(e.message||'HEIC worker could not start.'));};
- });
- return heicWorkerPromise;
-}
-async function heicBlob(canvas,outputMime='image/heic'){
+ `;
+ const blob=new Blob([workerCode],{type:'text/javascript'});
+ const url=URL.createObjectURL(blob);
  try{
-  const w=canvas.width,h=canvas.height;
-  if(!w||!h)throw new Error('The source image has empty dimensions.');
-  const ctx=canvas.getContext('2d',{willReadFrequently:true});
-  if(!ctx)throw new Error('Could not read the source canvas.');
-  const imageData=ctx.getImageData(0,0,w,h);
-  const rgba=new Uint8Array(imageData.data.length);
-  rgba.set(imageData.data);
-  const worker=await heicWorker();
-  const result=await new Promise((resolve,reject)=>{
-   const oldError=worker.onerror;
-   worker.onmessage=e=>{
-    if(e.data&&e.data.result){worker.onmessage=null;resolve(e.data.buffer);}
-    else if(e.data&&!e.data.result){worker.onmessage=null;reject(new Error(e.data.error||'HEIC encoding failed.'));}
-   };
-   worker.onerror=e=>{worker.onmessage=null;reject(new Error(e.message||'HEIC worker error.'));};
-   worker.postMessage({rgba:rgba.buffer,width:w,height:h},[rgba.buffer]);
-  });
-  const bytes=new Uint8Array(result);
-  if(bytes.length<32)throw new Error('Generated HEIC file is too small.');
-  const u32=(a,o)=>(((a[o]<<24)|(a[o+1]<<16)|(a[o+2]<<8)|a[o+3])>>>0);
-  const fourcc=(a,o)=>String.fromCharCode(a[o],a[o+1],a[o+2],a[o+3]);
-  if(fourcc(bytes,4)!=='ftyp')throw new Error('Generated file has no valid ftyp box.');
-  let ftypSize=u32(bytes,0);
-  if(ftypSize===1){if(bytes.length<24)throw new Error('Invalid extended ftyp box.');const hi=u32(bytes,8),lo=u32(bytes,12);if(hi!==0||lo<24)throw new Error('Invalid extended ftyp size.');ftypSize=lo;}
-  if(ftypSize<16||ftypSize>bytes.length)throw new Error('Invalid HEIF ftyp size.');
-  const brands=[];for(let i=8;i+4<=ftypSize;i+=4)brands.push(fourcc(bytes,i));
-  if(!brands.some(b=>['heic','heix','hevc','hevx','heim','heis','mif1','mif2'].includes(b)))throw new Error('Generated file is not a recognized HEIF/HEIC container.');
-  let pos=ftypSize,hasMeta=false,hasMdat=false;
-  while(pos+8<=bytes.length){
-   const size=u32(bytes,pos),type=fourcc(bytes,pos+4);
-   let step=size;
-   if(size===0)step=bytes.length-pos;
-   else if(size===1){if(pos+16>bytes.length)break;const hi=u32(bytes,pos+8),lo=u32(bytes,pos+12);if(hi!==0||lo<16||pos+lo>bytes.length)break;step=lo;}
-   else if(size<8||pos+size>bytes.length)break;
-   if(type==='meta')hasMeta=true;
-   if(type==='mdat')hasMdat=true;
-   if(step<=0)break;
-   pos+=step;
-  }
-  if(!hasMeta||!hasMdat)throw new Error('Generated HEIF container is incomplete.');
-  return new Blob([bytes],{type:outputMime==='image/heif'?'image/heif':'image/heic'});
+  heicWorker=new Worker(url,{type:'module'});
  }catch(e){
-  throw new Error('HEIC/HEIF conversion failed: '+(e&&e.message?e.message:String(e))+'. Please use the website over HTTPS/localhost with internet access.');
+  URL.revokeObjectURL(url);
+  heicWorker=null;
+  throw new Error('HEIC encoder worker could not start. Please use HTTPS/localhost and a modern browser with WebAssembly SIMD support.');
  }
+ URL.revokeObjectURL(url);
+ heicWorker.onmessage=e=>{
+  const {id,ok,bytes,error}=e.data||{};
+  const pending=heicPending.get(id);
+  if(!pending)return;
+  heicPending.delete(id);
+  if(ok)pending.resolve(new Uint8Array(bytes));
+  else pending.reject(new Error(error||'HEIC encoding failed.'));
+ };
+ heicWorker.onerror=e=>{
+  const msg=e&&e.message?e.message:'HEIC worker error.';
+  for(const [id,p] of heicPending){heicPending.delete(id);p.reject(new Error(msg));}
+  heicWorker=null;
+ };
+ return heicWorker;
+}
+
+function encodeHeicInWorker(imageData){
+ return new Promise((resolve,reject)=>{
+  try{
+   const worker=getHeicWorker();
+   const id=++heicRequestId;
+   heicPending.set(id,{resolve,reject});
+   const rgba=new Uint8Array(imageData.data);
+   worker.postMessage({id,rgba:rgba.buffer,width:imageData.width,height:imageData.height},[rgba.buffer]);
+  }catch(e){reject(e);}
+ });
+}
+
+async function heicBlob(canvas,outputMime='image/heic'){
+ const w=canvas.width,h=canvas.height;
+ if(!w||!h)throw new Error('The source image has empty dimensions.');
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});
+ if(!ctx)throw new Error('Could not read the source canvas.');
+ const imageData=ctx.getImageData(0,0,w,h);
+ // Use an x265-backed libheif WASM encoder. This produces a conventional
+ // HEVC-in-HEIF file rather than the older kvazaar-based output.
+ const bytes=await encodeHeicInWorker(imageData);
+ if(!bytes||bytes.length<32)throw new Error('HEIC encoder returned incomplete data.');
+ const fourcc=(a,o)=>String.fromCharCode(a[o],a[o+1],a[o+2],a[o+3]);
+ if(fourcc(bytes,4)!=='ftyp')throw new Error('Encoder output has no valid HEIF ftyp box.');
+ const mime=outputMime==='image/heif'?'image/heif':'image/heic';
+ return new Blob([bytes],{type:mime});
 }
 async function rawDngBlob(sourceFile,canvas){
  const n=sourceFile.name.toLowerCase();
