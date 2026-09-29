@@ -14,7 +14,7 @@
 
   gtag('config', 'G-929DX37TTB');
 </script>
- 
+
 <title>Format Converter Studio.ARnc</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -156,7 +156,7 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
    <option value="image/x-adobe-dng">RAW / DNG</option>
    <option value="application/pdf">PDF</option>
   </select>
-  <small class="note">HEIC/HEIF uses a browser-side HEVC encoder. Windows Photos may also require the HEIF Image Extensions and HEVC Video Extensions installed in Windows; a browser cannot install these system codecs. DNG export works from decoded images as an RGB-DNG-style file; true camera-sensor RAW → DNG conversion requires a dedicated RAW decoder.</small>
+  <small class="note">HEIC/HEIF uses a browser-side HEVC encoder with container validation before download. Windows Photos may still require HEIF/HEVC system support. DNG export works from decoded images as an RGB-DNG-style file; true camera-sensor RAW → DNG conversion requires a dedicated RAW decoder.</small>
  </div>
 
  <div class="control">
@@ -621,68 +621,97 @@ function rawDngBlobFromCanvas(canvas){
  let q=stripOffset;for(let i=0;i<rgba.length;i+=4){u[q++]=rgba[i];u[q++]=rgba[i+1];u[q++]=rgba[i+2]}
  return new Blob([buf],{type:'image/x-adobe-dng'});
 }
-let heicEncoderModulePromise=null;
-async function heicBlob(canvas,outputMime='image/heic'){ 
- // Use elheif's HEVC encoder and reject any output that cannot be decoded
- // back into an image with the same dimensions before it is offered to download.
+let heicWorkerPromise=null;
+function heicWorker(){
+ if(heicWorkerPromise)return heicWorkerPromise;
+ heicWorkerPromise=new Promise((resolve,reject)=>{
+  const code=`
+   let encoderPromise=null;
+   async function getEncoder(){
+    if(!encoderPromise){
+     encoderPromise=(async()=>{
+      const mod=await import('https://cdn.jsdelivr.net/npm/@pbk20191/icodec@0.9.3/+esm');
+      const heic=mod.heic||mod.default?.heic;
+      if(!heic||typeof heic.loadEncoder!=='function'||typeof heic.encode!=='function')
+       throw new Error('HEIC encoder module is unavailable.');
+      await heic.loadEncoder('https://cdn.jsdelivr.net/npm/@pbk20191/icodec@0.9.3/heic-enc.wasm');
+      return heic;
+     })();
+    }
+    return encoderPromise;
+   }
+   getEncoder().then(()=>self.postMessage({ready:true})).catch(err=>self.postMessage({ready:false,error:err&&err.message?err.message:String(err)}));
+   self.onmessage=async e=>{
+    try{
+     const {rgba,width,height}=e.data;
+     const heic=await getEncoder();
+     const image={data:new Uint8ClampedArray(rgba),width,height};
+     const out=heic.encode(image);
+     if(!out||!out.length)throw new Error('HEIC encoder returned empty data.');
+     const copy=new Uint8Array(out.length);copy.set(out);
+     self.postMessage({result:true,buffer:copy.buffer},[copy.buffer]);
+    }catch(err){self.postMessage({result:false,error:err&&err.message?err.message:String(err)});}
+   };
+  `;
+  const blob=new Blob([code],{type:'text/javascript'});
+  const url=URL.createObjectURL(blob);
+  const worker=new Worker(url,{type:'module'});
+  URL.revokeObjectURL(url);
+  worker.onmessage=e=>{
+   if(e.data&&e.data.ready){
+    if(e.data.ready){worker.onmessage=null;resolve(worker);}
+    else {worker.terminate();reject(new Error(e.data.error||'HEIC encoder failed to initialize.'));}
+   }
+  };
+  worker.onerror=e=>{worker.terminate();reject(new Error(e.message||'HEIC worker could not start.'));};
+ });
+ return heicWorkerPromise;
+}
+async function heicBlob(canvas,outputMime='image/heic'){
  try{
-  if(!heicEncoderModulePromise){
-   heicEncoderModulePromise=import('https://esm.sh/elheif@0.1.0?bundle');
-  }
-  const mod=await heicEncoderModulePromise;
-  const api=mod.default&&typeof mod.default.jsEncodeImage==='function'?mod.default:mod;
-  if(typeof api.ensureInitialized!=='function'||typeof api.jsEncodeImage!=='function'||typeof api.jsDecodeImage!=='function')
-   throw new Error('HEIC encoder/decoder API is incomplete.');
-  await api.ensureInitialized();
   const w=canvas.width,h=canvas.height;
   if(!w||!h)throw new Error('The source image has empty dimensions.');
-  const imageData=canvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,h);
-  // Copy the pixels into a plain Uint8Array for the WebAssembly binding.
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});
+  if(!ctx)throw new Error('Could not read the source canvas.');
+  const imageData=ctx.getImageData(0,0,w,h);
   const rgba=new Uint8Array(imageData.data.length);
   rgba.set(imageData.data);
-  const result=api.jsEncodeImage(rgba,w,h);
-  if(!result||result.err||!result.data||!result.data.length)
-   throw new Error(result&&result.err?result.err:'HEIC encoder returned empty data.');
-  const bytes=result.data instanceof Uint8Array?new Uint8Array(result.data):new Uint8Array(result.data);
-  if(bytes.length<32||String.fromCharCode(bytes[4],bytes[5],bytes[6],bytes[7])!=='ftyp')
-   throw new Error('Encoder output is not a complete ISO-BMFF HEIF file (missing ftyp box).');
+  const worker=await heicWorker();
+  const result=await new Promise((resolve,reject)=>{
+   const oldError=worker.onerror;
+   worker.onmessage=e=>{
+    if(e.data&&e.data.result){worker.onmessage=null;resolve(e.data.buffer);}
+    else if(e.data&&!e.data.result){worker.onmessage=null;reject(new Error(e.data.error||'HEIC encoding failed.'));}
+   };
+   worker.onerror=e=>{worker.onmessage=null;reject(new Error(e.message||'HEIC worker error.'));};
+   worker.postMessage({rgba:rgba.buffer,width:w,height:h},[rgba.buffer]);
+  });
+  const bytes=new Uint8Array(result);
+  if(bytes.length<32)throw new Error('Generated HEIC file is too small.');
   const u32=(a,o)=>(((a[o]<<24)|(a[o+1]<<16)|(a[o+2]<<8)|a[o+3])>>>0);
+  const fourcc=(a,o)=>String.fromCharCode(a[o],a[o+1],a[o+2],a[o+3]);
+  if(fourcc(bytes,4)!=='ftyp')throw new Error('Generated file has no valid ftyp box.');
   let ftypSize=u32(bytes,0);
-  if(ftypSize===1){
-   if(bytes.length<32)throw new Error('Invalid extended HEIF ftyp box.');
-   const hi=u32(bytes,8),lo=u32(bytes,12);
-   if(hi!==0||lo<24)throw new Error('Unsupported or invalid HEIF ftyp size.');
-   ftypSize=lo;
+  if(ftypSize===1){if(bytes.length<24)throw new Error('Invalid extended ftyp box.');const hi=u32(bytes,8),lo=u32(bytes,12);if(hi!==0||lo<24)throw new Error('Invalid extended ftyp size.');ftypSize=lo;}
+  if(ftypSize<16||ftypSize>bytes.length)throw new Error('Invalid HEIF ftyp size.');
+  const brands=[];for(let i=8;i+4<=ftypSize;i+=4)brands.push(fourcc(bytes,i));
+  if(!brands.some(b=>['heic','heix','hevc','hevx','heim','heis','mif1','mif2'].includes(b)))throw new Error('Generated file is not a recognized HEIF/HEIC container.');
+  let pos=ftypSize,hasMeta=false,hasMdat=false;
+  while(pos+8<=bytes.length){
+   const size=u32(bytes,pos),type=fourcc(bytes,pos+4);
+   let step=size;
+   if(size===0)step=bytes.length-pos;
+   else if(size===1){if(pos+16>bytes.length)break;const hi=u32(bytes,pos+8),lo=u32(bytes,pos+12);if(hi!==0||lo<16||pos+lo>bytes.length)break;step=lo;}
+   else if(size<8||pos+size>bytes.length)break;
+   if(type==='meta')hasMeta=true;
+   if(type==='mdat')hasMdat=true;
+   if(step<=0)break;
+   pos+=step;
   }
-  if(ftypSize<16||ftypSize>bytes.length||((ftypSize-8)%4)!==0)
-   throw new Error('Invalid HEIF ftyp box length.');
-  const brands=[];
-  for(let i=8;i+4<=ftypSize;i+=4)brands.push(String.fromCharCode(bytes[i],bytes[i+1],bytes[i+2],bytes[i+3]));
-  // Do not give generic HEIF/AVIF or unrelated containers a .heic suffix.
-  const heicBrands=['heic','heix','hevc','hevx','heim','heis'];
-  if(!brands.some(b=>heicBrands.includes(b)))
-   throw new Error('Encoder produced a generic HEIF container, not a HEIC-branded file; refusing to save it as .heic.');
-  // Require a media-data box in addition to the file-type header.
-  let hasMdat=false;
-  for(let i=ftypSize;i+8<=bytes.length;){
-   const size=u32(bytes,i),type=String.fromCharCode(bytes[i+4],bytes[i+5],bytes[i+6],bytes[i+7]);
-   if(type==='mdat'&&size>=8&&i+size<=bytes.length){hasMdat=true;break;}
-   if(size===0)break;
-   if(size===1){if(i+16>bytes.length)break;const hi=u32(bytes,i+8),lo=u32(bytes,i+12);if(hi!==0||lo<16||i+lo>bytes.length)break;i+=lo;}
-   else {if(size<8||i+size>bytes.length)break;i+=size;}
-  }
-  if(!hasMdat)throw new Error('HEIC container has no complete image media-data box.');
-  // Round-trip through the codec, and reject an output whose decoded pixels are empty.
-  const check=api.jsDecodeImage(bytes);
-  if(!check||check.err||!Array.isArray(check.data)||!check.data.length)
-   throw new Error('HEIC round-trip decode failed'+(check&&check.err?': '+check.err:'.'));
-  const decoded=check.data[0];
-  if(decoded.width!==w||decoded.height!==h||!decoded.data||decoded.data.length<w*h*4)
-   throw new Error('HEIC/HEIF round-trip dimensions/pixel data do not match the source.');
+  if(!hasMeta||!hasMdat)throw new Error('Generated HEIF container is incomplete.');
   return new Blob([bytes],{type:outputMime==='image/heif'?'image/heif':'image/heic'});
  }catch(e){
-  heicEncoderModulePromise=null;
-  throw new Error('HEIC file failed encoder validation and was not downloaded: '+(e&&e.message?e.message:String(e))+'. Use the site on HTTPS/localhost with internet access. If a validated HEIC still will not open in Windows Photos, install Windows HEIF Image Extensions or test in another HEIF-capable viewer.');
+  throw new Error('HEIC/HEIF conversion failed: '+(e&&e.message?e.message:String(e))+'. Please use the website over HTTPS/localhost with internet access.');
  }
 }
 async function rawDngBlob(sourceFile,canvas){
@@ -764,7 +793,7 @@ function showConverted(){
   const visual=!!r.previewBlob || (/^image\//.test(r.mime)&&r.mime!=='image/svg+xml');
   card.innerHTML=`<div class="thumb">${visual?`<img src="${url}" alt="">`:`<div class="fileicon">${r.mime==='application/pdf'?'📄':r.mime==='image/svg+xml'?'🔷':'🖼️'}</div>`}</div>
   <div class="cardbody"><div class="name">${escapeHtml(r.name)}</div>
-  <div class="meta">${r.w} × ${r.h}px${r.pages>1?`<br>Page: ${r.page}/${r.pages}`:''}<br>Format: ${r.mime}<br>Original: ${fmtBytes(r.oldSize)} → Final: ${fmtBytes(r.newSize)}<br>${r.newSize<r.oldSize?'Reduced by '+((1-r.newSize/r.oldSize)*100).toFixed(1)+'%':'File size increased'}${(r.mime==='image/heic'||r.mime==='image/heif')?'<br><b>Windows note:</b> HEIC/HEIF uses HEVC. Windows Photos may need HEIF Image Extensions and HEVC Video Extensions.': ''}</div>
+  <div class="meta">${r.w} × ${r.h}px${r.pages>1?`<br>Page: ${r.page}/${r.pages}`:''}<br>Format: ${r.mime}<br>Original: ${fmtBytes(r.oldSize)} → Final: ${fmtBytes(r.newSize)}<br>${r.newSize<r.oldSize?'Reduced by '+((1-r.newSize/r.oldSize)*100).toFixed(1)+'%':'File size increased'}${(r.mime==='image/heic'||r.mime==='image/heif')?'<br><b>Windows note:</b> HEIC/HEIF is generated with the browser-side HEVC encoder. Windows Photos may need HEIF Image Extensions and HEVC Video Extensions.': ''}</div>
   <button class="btn green" data-dl="${i}">⬇️ Download</button></div>`;
   results.appendChild(card);
  });
@@ -774,7 +803,28 @@ function showConverted(){
  <div class="stat">Final: <b>${fmtBytes(converted.reduce((a,x)=>a+x.newSize,0))}</b></div>`;
 }
 function saveBlob(blob,name){
- if(window.saveAs)saveAs(blob,name);else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+ // Use a fresh Blob with the correct HEIC/HEIF MIME type and native browser
+ // download. This avoids FileSaver/temporary-Blob MIME mismatches on desktop.
+ try{
+  const lower=String(name||'').toLowerCase();
+  let mime=blob&&blob.type?blob.type:'application/octet-stream';
+  if(lower.endsWith('.heic'))mime='image/heic';
+  else if(lower.endsWith('.heif'))mime='image/heif';
+  const downloadBlob=blob.slice(0,blob.size,mime);
+  const url=URL.createObjectURL(downloadBlob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=name;
+  a.rel='noopener';
+  a.style.display='none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),15000);
+ }catch(e){
+  if(window.saveAs)saveAs(blob,name);
+  else throw e;
+ }
 }
 $('convert').onclick=async()=>{
  if(!items.length){alert('Please choose at least one file.');return}
