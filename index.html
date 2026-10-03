@@ -404,7 +404,8 @@ async function decodeTiff(file){
  TIFF.decodeImage(buf,ifds[0]);
  const rgba=TIFF.toRGBA8(ifds[0]),w=ifds[0].width,h=ifds[0].height;
  const c=document.createElement('canvas');c.width=w;c.height=h;
- c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba),w,h));
+ const ctx=c.getContext('2d');
+ ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba),w,h),0,0);
  return c;
 }
 async function decodeHeic(file){
