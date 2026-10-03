@@ -36,7 +36,7 @@
       let LibRawClass;
       let raw;
       async function init(){
-        ready=(async()=>{const module=await LibRawModule();LibRawClass=module.LibRaw;raw=new LibRawClass();})();
+        ready=(async()=>{LibRawClass=LibRawModule?.default || LibRawModule; if(!LibRawClass) throw new Error('LibRaw constructor is unavailable.'); raw=new LibRawClass();})();
         await ready;
       }
       init();
@@ -49,7 +49,7 @@
           const transfer=[];
           if(out&&typeof out==='object') for(const key in out){const v=out[key];if(isTypedArray(v))transfer.push(v.buffer)}
           self.postMessage({id,out},transfer);
-        }catch(err){self.postMessage({id,error:String(err&&err.message?err.message:err)})}
+        }catch(err){self.postMessage({id,error:(()=>{try{if(err&&err.message)return String(err.message);if(typeof err==='string')return err;return JSON.stringify(err,Object.getOwnPropertyNames(err));}catch(_){return String(err);}})()})}
       };
     `;
     const workerURL=URL.createObjectURL(new Blob([workerSource],{type:'text/javascript'}));
@@ -486,27 +486,40 @@ async function decodeDngWithLibRaw(file){
   if(!LibRaw) throw new Error('LibRaw-Wasm decoder could not be loaded.');
   const raw = new LibRaw();
   const buffer = await file.arrayBuffer();
-  await raw.open(new Uint8Array(buffer), {
-    outputColor: 1,
-    outputBps: 8,
-    useCameraWb: true,
-    useCameraMatrix: 3,
-    userFlip: -1
-  });
-  const decoded = await raw.imageData();
-  const data = decoded && decoded.data ? decoded.data : decoded;
-  const width = Number(decoded && (decoded.width || decoded.w));
-  const height = Number(decoded && (decoded.height || decoded.h));
-  if(!data || !width || !height) throw new Error('LibRaw returned no decoded RGB image.');
-  const pixels = data instanceof Uint8ClampedArray ? data : new Uint8ClampedArray(data);
-  if(pixels.length < width*height*3) throw new Error('LibRaw returned incomplete RGB pixel data.');
-  const c=document.createElement('canvas'); c.width=width; c.height=height;
-  const ctx=c.getContext('2d',{willReadFrequently:true});
-  const rgba=new Uint8ClampedArray(width*height*4);
-  for(let i=0,j=0;i<width*height;i++,j+=4){
-    const k=i*3; rgba[j]=pixels[k]; rgba[j+1]=pixels[k+1]; rgba[j+2]=pixels[k+2]; rgba[j+3]=255;
+  try{
+    await raw.open(new Uint8Array(buffer), {
+      outputColor: 1,
+      outputBps: 8,
+      useCameraWb: true,
+      useCameraMatrix: 3,
+      userFlip: -1
+    });
+    const decoded = await raw.imageData();
+    const data = decoded && decoded.data ? decoded.data : decoded;
+    const width = Number(decoded && (decoded.width || decoded.w));
+    const height = Number(decoded && (decoded.height || decoded.h));
+    if(!data || !width || !height) throw new Error('LibRaw returned no decoded RGB image.');
+    const pixels = data instanceof Uint8ClampedArray ? data : new Uint8ClampedArray(data);
+    if(pixels.length < width*height*3) throw new Error('LibRaw returned incomplete RGB pixel data.');
+    const c=document.createElement('canvas'); c.width=width; c.height=height;
+    const ctx=c.getContext('2d',{willReadFrequently:true});
+    const rgba=new Uint8ClampedArray(width*height*4);
+    for(let i=0,j=0;i<width*height;i++,j+=4){
+      const k=i*3; rgba[j]=pixels[k]; rgba[j+1]=pixels[k+1]; rgba[j+2]=pixels[k+2]; rgba[j+3]=255;
+    }
+    ctx.putImageData(new ImageData(rgba,width,height),0,0);
+    return c;
+  }finally{
+    try{raw.dispose?.()}catch(_){ }
   }
-  ctx.putImageData(new ImageData(rgba,width,height),0,0);
+}
+
+async function decodeDngWithEmbeddedPreview(file){
+  const jpg=await extractEmbeddedJpegFromDng(file);
+  const img=await imageFromBlob(jpg);
+  const c=document.createElement('canvas');
+  c.width=img.naturalWidth||img.width; c.height=img.naturalHeight||img.height;
+  c.getContext('2d').drawImage(img,0,0);
   return c;
 }
 
@@ -704,8 +717,16 @@ async function decodeAny(file){
     try{
       const c=await decodeDngWithLibRaw(file);
       return {pages:[c],source:'DNG / RAW (LibRaw)'};
-    }catch(e){
-      throw new Error('DNG/RAW decoding failed: '+(e&&e.message?e.message:'LibRaw could not decode this file.'));
+    }catch(rawErr){
+      // Many DNG files contain a full-size JPEG preview even when their RAW
+      // compression is not supported by the browser-side LibRaw build.
+      try{
+        const c=await decodeDngWithEmbeddedPreview(file);
+        return {pages:[c],source:'DNG (embedded JPEG preview)'};
+      }catch(previewErr){
+        const msg=rawErr?.message||String(rawErr||'Unknown RAW decoder error');
+        throw new Error('DNG/RAW decoding failed: '+msg);
+      }
     }
   }
 
