@@ -25,22 +25,65 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script type="module">
-  // LibRaw-Wasm gives the browser a real RAW/DNG decoder instead of relying on
-  // the browser's normal image decoder (which commonly rejects camera RAW/DNG).
-  // It runs locally in the browser; the RAW bytes are passed to LibRaw-Wasm.
+  // GitHub Pages cannot construct a Worker directly from a different origin.
+  // The RAW decoder below creates a SAME-ORIGIN blob worker and lets that worker
+  // import LibRaw's module from jsDelivr. This avoids the cross-origin Worker error.
   window.ARncLibRawPromise = (async()=>{
-    const urls = [
-      "https://cdn.jsdelivr.net/npm/libraw-wasm@1.6.0/dist/index.min.js",
-      "https://esm.sh/libraw-wasm@1.6.0"
-    ];
-    for(const url of urls){
-      try{
-        const mod = await import(url);
-        const LibRaw = mod.default || mod.LibRaw || mod;
-        if(typeof LibRaw === 'function') return LibRaw;
-      }catch(e){ console.warn('LibRaw-Wasm load failed:', url, e); }
+    const LIBRAW_MODULE = 'https://cdn.jsdelivr.net/npm/libraw-wasm@1.6.0/dist/libraw.js';
+    const workerSource = `
+      import LibRawModule from '${LIBRAW_MODULE}';
+      let ready;
+      let LibRawClass;
+      let raw;
+      async function init(){
+        ready=(async()=>{const module=await LibRawModule();LibRawClass=module.LibRaw;raw=new LibRawClass();})();
+        await ready;
+      }
+      init();
+      function isTypedArray(obj){return ArrayBuffer.isView(obj)&&!(obj instanceof DataView)}
+      self.onmessage=async(event)=>{
+        const {id,fn,args}=event.data||{};
+        try{
+          await ready;
+          const out=raw[fn](...args);
+          const transfer=[];
+          if(out&&typeof out==='object') for(const key in out){const v=out[key];if(isTypedArray(v))transfer.push(v.buffer)}
+          self.postMessage({id,out},transfer);
+        }catch(err){self.postMessage({id,error:String(err&&err.message?err.message:err)})}
+      };
+    `;
+    const workerURL=URL.createObjectURL(new Blob([workerSource],{type:'text/javascript'}));
+    class ARncLibRaw {
+      constructor(){
+        this.worker=new Worker(workerURL,{type:'module'});
+        this.pending=new Map();this.nextId=0;this.tail=Promise.resolve();this.disposed=false;
+        this.worker.onmessage=({data})=>{
+          const slot=this.pending.get(data?.id);if(!slot)return;
+          this.pending.delete(data.id);
+          data?.error?slot.reject(new Error(data.error)):slot.resolve(data?.out);
+        };
+        this.worker.onerror=e=>{
+          const msg=e?.message||'RAW decoder worker failed.';
+          for(const [id,p] of this.pending){this.pending.delete(id);p.reject(new Error(msg))}
+        };
+      }
+      dispose(){this.disposed=true;this.worker.terminate();for(const p of this.pending.values())p.reject(new Error('LibRaw disposed'));this.pending.clear()}
+      runFn(fn,...args){
+        const exec=()=>new Promise((resolve,reject)=>{
+          if(this.disposed)return reject(new Error('LibRaw disposed'));
+          const id=this.nextId++;this.pending.set(id,{resolve,reject});
+          this.worker.postMessage({id,fn,args},args.map(a=>a?.buffer).filter(Boolean));
+        });
+        const result=this.tail.then(exec,exec);this.tail=result.then(()=>{},()=>{});return result;
+      }
+      open(buffer,settings){return this.runFn('open',buffer,settings)}
+      metadata(fullOutput){return this.runFn('metadata',!!fullOutput)}
+      imageData(){return this.runFn('imageData')}
+      rawImageData(){return this.runFn('rawImageData')}
+      thumbnailData(){return this.runFn('thumbnailData')}
     }
-    return null;
+    // Give the module worker a moment to initialize only when first used.
+    return ARncLibRaw;
   })();
 </script>
 
