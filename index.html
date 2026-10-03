@@ -25,65 +25,23 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script type="module">
-  // GitHub Pages cannot construct a Worker directly from a different origin.
-  // The RAW decoder below creates a SAME-ORIGIN blob worker and lets that worker
-  // import LibRaw's module from jsDelivr. This avoids the cross-origin Worker error.
+  // RAW/DNG decoder: use the maintained no-Worker @colorhythm binding.
+  // This avoids both the cross-origin Worker restriction and the incorrect
+  // "LibRawClass is not a constructor" import used in the previous build.
   window.ARncLibRawPromise = (async()=>{
-    const LIBRAW_MODULE = 'https://cdn.jsdelivr.net/npm/libraw-wasm@1.6.0/dist/libraw.js';
-    const workerSource = `
-      import LibRawModule from '${LIBRAW_MODULE}';
-      let ready;
-      let LibRawClass;
-      let raw;
-      async function init(){
-        ready=(async()=>{LibRawClass=LibRawModule?.default || LibRawModule; if(!LibRawClass) throw new Error('LibRaw constructor is unavailable.'); raw=new LibRawClass();})();
-        await ready;
-      }
-      init();
-      function isTypedArray(obj){return ArrayBuffer.isView(obj)&&!(obj instanceof DataView)}
-      self.onmessage=async(event)=>{
-        const {id,fn,args}=event.data||{};
-        try{
-          await ready;
-          const out=raw[fn](...args);
-          const transfer=[];
-          if(out&&typeof out==='object') for(const key in out){const v=out[key];if(isTypedArray(v))transfer.push(v.buffer)}
-          self.postMessage({id,out},transfer);
-        }catch(err){self.postMessage({id,error:(()=>{try{if(err&&err.message)return String(err.message);if(typeof err==='string')return err;return JSON.stringify(err,Object.getOwnPropertyNames(err));}catch(_){return String(err);}})()})}
-      };
-    `;
-    const workerURL=URL.createObjectURL(new Blob([workerSource],{type:'text/javascript'}));
-    class ARncLibRaw {
-      constructor(){
-        this.worker=new Worker(workerURL,{type:'module'});
-        this.pending=new Map();this.nextId=0;this.tail=Promise.resolve();this.disposed=false;
-        this.worker.onmessage=({data})=>{
-          const slot=this.pending.get(data?.id);if(!slot)return;
-          this.pending.delete(data.id);
-          data?.error?slot.reject(new Error(data.error)):slot.resolve(data?.out);
-        };
-        this.worker.onerror=e=>{
-          const msg=e?.message||'RAW decoder worker failed.';
-          for(const [id,p] of this.pending){this.pending.delete(id);p.reject(new Error(msg))}
-        };
-      }
-      dispose(){this.disposed=true;this.worker.terminate();for(const p of this.pending.values())p.reject(new Error('LibRaw disposed'));this.pending.clear()}
-      runFn(fn,...args){
-        const exec=()=>new Promise((resolve,reject)=>{
-          if(this.disposed)return reject(new Error('LibRaw disposed'));
-          const id=this.nextId++;this.pending.set(id,{resolve,reject});
-          this.worker.postMessage({id,fn,args},args.map(a=>a?.buffer).filter(Boolean));
-        });
-        const result=this.tail.then(exec,exec);this.tail=result.then(()=>{},()=>{});return result;
-      }
-      open(buffer,settings){return this.runFn('open',buffer,settings)}
-      metadata(fullOutput){return this.runFn('metadata',!!fullOutput)}
-      imageData(){return this.runFn('imageData')}
-      rawImageData(){return this.runFn('rawImageData')}
-      thumbnailData(){return this.runFn('thumbnailData')}
+    const urls = [
+      'https://cdn.jsdelivr.net/npm/@colorhythm/libraw-wasm@1.1.1/dist/index.js',
+      'https://esm.sh/@colorhythm/libraw-wasm@1.1.1'
+    ];
+    let mod; let lastErr;
+    for (const url of urls) {
+      try { mod = await import(url); break; } catch(e) { lastErr=e; }
     }
-    // Give the module worker a moment to initialize only when first used.
-    return ARncLibRaw;
+    if (!mod) throw new Error('RAW decoder module could not be loaded: ' + (lastErr?.message || lastErr));
+    const LibRaw = mod.LibRaw || mod.default?.LibRaw || mod.default;
+    if (typeof LibRaw !== 'function') throw new Error('RAW decoder module loaded, but its LibRaw class was not found.');
+    await LibRaw.initialize();
+    return LibRaw;
   })();
 </script>
 
@@ -483,34 +441,45 @@ async function extractEmbeddedJpegFromDng(file){
 
 async function decodeDngWithLibRaw(file){
   const LibRaw = await window.ARncLibRawPromise;
-  if(!LibRaw) throw new Error('LibRaw-Wasm decoder could not be loaded.');
   const raw = new LibRaw();
-  const buffer = await file.arrayBuffer();
-  try{
-    await raw.open(new Uint8Array(buffer), {
-      outputColor: 1,
-      outputBps: 8,
-      useCameraWb: true,
-      useCameraMatrix: 3,
-      userFlip: -1
-    });
-    const decoded = await raw.imageData();
-    const data = decoded && decoded.data ? decoded.data : decoded;
-    const width = Number(decoded && (decoded.width || decoded.w));
-    const height = Number(decoded && (decoded.height || decoded.h));
-    if(!data || !width || !height) throw new Error('LibRaw returned no decoded RGB image.');
-    const pixels = data instanceof Uint8ClampedArray ? data : new Uint8ClampedArray(data);
-    if(pixels.length < width*height*3) throw new Error('LibRaw returned incomplete RGB pixel data.');
+  try {
+    await raw.waitUntilReady?.();
+    const buffer = await file.arrayBuffer();
+    raw.open(buffer);
+    raw.unpack();
+
+    // Render the unpacked RAW through LibRaw's processed-image path.
+    try { raw.setUseCameraWb?.(1); } catch (_) {}
+    try { raw.setOutputColor?.(1); } catch (_) {}
+    try { raw.setHalfSize?.(0); } catch (_) {}
+    raw.dcrawProcess();
+    const rendered = raw.dcrawMakeMemImage();
+
+    const data = rendered?.data || rendered?.image || rendered;
+    const width = Number(rendered?.width || rendered?.w || rendered?.cols);
+    const height = Number(rendered?.height || rendered?.h || rendered?.rows);
+    const colors = Number(rendered?.colors || rendered?.channels || 3);
+    if (!data || !width || !height) throw new Error('LibRaw returned no rendered RGB image.');
+
+    const src = data instanceof Uint8Array ? data : new Uint8Array(data);
+    const pixelCount = width * height;
     const c=document.createElement('canvas'); c.width=width; c.height=height;
     const ctx=c.getContext('2d',{willReadFrequently:true});
-    const rgba=new Uint8ClampedArray(width*height*4);
-    for(let i=0,j=0;i<width*height;i++,j+=4){
-      const k=i*3; rgba[j]=pixels[k]; rgba[j+1]=pixels[k+1]; rgba[j+2]=pixels[k+2]; rgba[j+3]=255;
+    const rgba=new Uint8ClampedArray(pixelCount*4);
+    if (colors >= 3) {
+      for(let i=0, j=0, k=0; i<pixelCount; i++,j+=4,k+=colors){
+        rgba[j]=src[k]; rgba[j+1]=src[k+1]; rgba[j+2]=src[k+2]; rgba[j+3]=255;
+      }
+    } else {
+      for(let i=0,j=0;i<pixelCount;i++,j+=4){ const v=src[i]; rgba[j]=rgba[j+1]=rgba[j+2]=v; rgba[j+3]=255; }
     }
     ctx.putImageData(new ImageData(rgba,width,height),0,0);
     return c;
-  }finally{
-    try{raw.dispose?.()}catch(_){ }
+  } catch(err) {
+    const msg = err?.message || (err?.code ? `LibRaw error code ${err.code}` : String(err));
+    throw new Error(msg);
+  } finally {
+    try { raw.dispose?.(); } catch (_) {}
   }
 }
 
