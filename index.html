@@ -24,6 +24,25 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script type="module">
+  // LibRaw-Wasm gives the browser a real RAW/DNG decoder instead of relying on
+  // the browser's normal image decoder (which commonly rejects camera RAW/DNG).
+  // It runs locally in the browser; the RAW bytes are passed to LibRaw-Wasm.
+  window.ARncLibRawPromise = (async()=>{
+    const urls = [
+      "https://cdn.jsdelivr.net/npm/libraw-wasm@1.6.0/dist/index.min.js",
+      "https://esm.sh/libraw-wasm@1.6.0"
+    ];
+    for(const url of urls){
+      try{
+        const mod = await import(url);
+        const LibRaw = mod.default || mod.LibRaw || mod;
+        if(typeof LibRaw === 'function') return LibRaw;
+      }catch(e){ console.warn('LibRaw-Wasm load failed:', url, e); }
+    }
+    return null;
+  })();
+</script>
 
 <style>
 *{box-sizing:border-box}
@@ -125,7 +144,7 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
  <span class="badge ok">AVIF</span><span class="badge">GIF</span><span class="badge">TIFF</span>
  <span class="badge">SVG</span><span class="badge">ICO</span><span class="badge">PDF</span>
  <span class="badge warn">HEIC / HEIF input</span><span class="badge warn">Any extension input</span><span class="badge warn">RAW input*</span>
-</div><div class="dng-note">DNG/RAW files are accepted. DNG preview depends on the browser or available RAW decoder.</div>
+</div><div class="dng-note">DNG/RAW files are accepted and decoded with LibRaw-Wasm when available; the app falls back to embedded previews when full decoding is unavailable.</div>
 </header>
 
 <div class="panel">
@@ -239,7 +258,7 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
 <p>PDF conversion is included as part of the studio. PDF input can be rendered in the browser and processed page by page, while image content can be placed into a PDF document. Users can choose common page sizes such as A4 or Letter, or use image-fitting options. PDF orientation can be automatic, portrait, or landscape. The resulting document is created on the client side using browser JavaScript. The exact visual result can depend on the source dimensions, page proportions, browser rendering, and selected quality settings.</p>
 <p>SVG processing is designed for situations where vector content needs to be converted into a raster image or PDF representation. The SVG scale option allows the rasterization size to be adjusted. Because SVG files can contain external resources, scripts, fonts, filters, and features with varying browser support, not every SVG document is guaranteed to render identically in every environment. The application therefore treats browser rendering as the basis for the conversion rather than promising identical results to every professional desktop graphics application.</p>
 <p>TIFF, HEIC, and HEIF are handled through browser-side decoding support and associated JavaScript libraries. TIFF decoding uses a browser-accessible TIFF decoder, while HEIC and HEIF input can use a browser-side conversion library when it is available. These formats can be computationally heavier than ordinary JPEG or PNG files, especially when files are large. Processing time may therefore increase with file size, image dimensions, device memory, and browser performance.</p>
-<p>RAW camera files require special attention. Camera RAW formats are not a single universal format; different manufacturers and camera models may use different containers, compression methods, metadata, and sensor characteristics. The website can recognize several common RAW file extensions, but actual decoding depends on the browser and available decoder support. The application therefore does not promise that every RAW file will open successfully. Where true sensor-level RAW processing is required, dedicated RAW software may be more appropriate.</p>
+<p>RAW camera files require special attention. Camera RAW formats are not a single universal format; different manufacturers and camera models may use different containers, compression methods, metadata, and sensor characteristics. The website can recognize several common RAW file extensions, but actual decoding depends on the browser and available decoder support. The application uses a browser-side LibRaw decoder for common RAW/DNG files, but unusual, damaged, unsupported, or highly compressed RAW variants may still fail to decode. Where true sensor-level RAW processing is required, dedicated RAW software may be more appropriate.</p>
 <p>The DNG output option should also be understood in context. The application can create an RGB-DNG-style output from decoded image data, but this is not equivalent to converting an original camera RAW sensor file into a fully metadata-preserving, sensor-native DNG. The source code itself identifies this limitation. Users who require professional camera metadata, original sensor data, color calibration information, or manufacturer-specific RAW characteristics should use specialized RAW conversion software.</p>
 <p>Batch processing is one of the central conveniences of the studio. Multiple selected files can be processed using the same conversion settings. A progress bar provides visual feedback while files are being processed. The application uses a small amount of controlled concurrency so that several files can be handled without attempting to process every file simultaneously. Actual performance varies according to file size, number of files, browser memory, processor speed, device type, and the complexity of each source format.</p>
 <p>After conversion, the results area shows information about each generated file, including dimensions, format, original size, final size, and the amount of reduction when applicable. Individual files can be downloaded using the Download button. The website also provides a ZIP option for downloading all converted files together. This can be particularly useful after batch conversion because it reduces the need to download many files separately. The ZIP package is assembled in the browser using JavaScript.</p>
@@ -419,8 +438,43 @@ async function extractEmbeddedJpegFromDng(file){
   throw new Error('No embedded JPEG preview found in this DNG.');
 }
 
+async function decodeDngWithLibRaw(file){
+  const LibRaw = await window.ARncLibRawPromise;
+  if(!LibRaw) throw new Error('LibRaw-Wasm decoder could not be loaded.');
+  const raw = new LibRaw();
+  const buffer = await file.arrayBuffer();
+  await raw.open(new Uint8Array(buffer), {
+    outputColor: 1,
+    outputBps: 8,
+    useCameraWb: true,
+    useCameraMatrix: 3,
+    userFlip: -1
+  });
+  const decoded = await raw.imageData();
+  const data = decoded && decoded.data ? decoded.data : decoded;
+  const width = Number(decoded && (decoded.width || decoded.w));
+  const height = Number(decoded && (decoded.height || decoded.h));
+  if(!data || !width || !height) throw new Error('LibRaw returned no decoded RGB image.');
+  const pixels = data instanceof Uint8ClampedArray ? data : new Uint8ClampedArray(data);
+  if(pixels.length < width*height*3) throw new Error('LibRaw returned incomplete RGB pixel data.');
+  const c=document.createElement('canvas'); c.width=width; c.height=height;
+  const ctx=c.getContext('2d',{willReadFrequently:true});
+  const rgba=new Uint8ClampedArray(width*height*4);
+  for(let i=0,j=0;i<width*height;i++,j+=4){
+    const k=i*3; rgba[j]=pixels[k]; rgba[j+1]=pixels[k+1]; rgba[j+2]=pixels[k+2]; rgba[j+3]=255;
+  }
+  ctx.putImageData(new ImageData(rgba,width,height),0,0);
+  return c;
+}
+
 async function decodeDngForPreview(file){
-  // Prefer an embedded JPEG preview because most browsers cannot decode DNG directly.
+  // Real RAW/DNG decode first. Embedded JPEG is only a preview fallback.
+  try{
+    const canvas=await decodeDngWithLibRaw(file);
+    return await canvasToPreviewBlob(canvas);
+  }catch(e){
+    console.warn('LibRaw preview decode failed:',e);
+  }
   try{return await extractEmbeddedJpegFromDng(file)}catch(e){}
   const candidates=[
     ()=>window.decodeDng&&window.decodeDng(file),
@@ -432,12 +486,11 @@ async function decodeDngForPreview(file){
       const r=await fn(); if(!r)continue;
       if(r instanceof Blob)return r;
       if(r instanceof ImageBitmap)return await canvasToPreviewBlob(r);
-      if(r.canvas instanceof HTMLCanvasElement)return await new Promise((res,rej)=>r.canvas.toBlob(b=>b?res(b):rej(new Error('DNG preview canvas failed')),'image/png'));
-      if(r instanceof HTMLCanvasElement)return await new Promise((res,rej)=>r.toBlob(b=>b?res(b):rej(new Error('DNG preview canvas failed')),'image/png'));
+      if(r.canvas instanceof HTMLCanvasElement)return await canvasToPreviewBlob(r.canvas);
+      if(r instanceof HTMLCanvasElement)return await canvasToPreviewBlob(r);
     }catch(e){}
   }
-  try{return await imageFromBlob(file)}
-  catch(e){throw new Error('DNG preview is not supported by this browser/decoder');}
+  throw new Error('RAW/DNG preview is not supported by the available decoder.');
 }
 
 async function getUploadPreview(it){
@@ -472,8 +525,11 @@ async function getUploadPreview(it){
       c.getContext('2d').drawImage(img,0,0);
       blobForPreview=await canvasToPreviewBlob(c);
       result={kind:'image',url:URL.createObjectURL(blobForPreview),label:'HEIC/HEIF preview'};
+    }else if(/\.(dng|crw|cr2|cr3|nef|arw|orf|rw2|raf|pef|srw|raw|nrw|srf|sr2|3fr|iiq|kdc|dcs|dcr|erf|mef|mrw|mos)$/i.test(name)){
+      const previewBlob = await decodeDngForPreview(file);
+      result={kind:'image',url:URL.createObjectURL(previewBlob),label:'LibRaw RAW/DNG preview'};
     }else{
-      // Try every uploaded file as an image, regardless of extension.
+      // Try every remaining uploaded file as a normal browser image.
       await imageFromBlob(file);
       result={kind:'image',url:URL.createObjectURL(file),label:'Browser image preview'};
     }
@@ -603,14 +659,23 @@ async function decodeAny(file){
     return {pages:[await decodeSvg(file,+$('svgScale').value)],source:'SVG'};
   if(/\.dng$/i.test(name)||mime==='image/x-adobe-dng'){
     try{
-      const preview=await decodeDngForPreview(file);
-      return {pages:[await imageFromBlob(preview)],source:'DNG (embedded JPEG preview)'};
+      const c=await decodeDngWithLibRaw(file);
+      return {pages:[c],source:'DNG / RAW (LibRaw)'};
     }catch(e){
-      throw new Error('DNG uploaded, but no browser-readable embedded JPEG preview was found. A full RAW/DNG decoder is required for sensor-data conversion.');
+      throw new Error('DNG/RAW decoding failed: '+(e&&e.message?e.message:'LibRaw could not decode this file.'));
     }
   }
 
-  // Do not depend on the extension: try the browser image decoder.
+  // RAW/DNG must be decoded by a RAW decoder, not by HTMLImageElement.
+  if(/\.(dng|crw|cr2|cr3|nef|arw|orf|rw2|raf|pef|srw|raw|nrw|srf|sr2|3fr|iiq|kdc|dcs|dcr|erf|mef|mrw|mos)$/i.test(name)){
+    try{
+      const c=await decodeDngWithLibRaw(file);
+      return {pages:[c],source:typeLabel(file)};
+    }catch(e){
+      throw new Error('RAW/DNG decoding failed: '+(e&&e.message?e.message:'LibRaw could not decode this file.'));
+    }
+  }
+  // Do not depend on the extension for ordinary browser-readable images.
   try{
     const img=await imageFromBlob(file);
     return {pages:[img],source:typeLabel(file)};
