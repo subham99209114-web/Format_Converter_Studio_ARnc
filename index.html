@@ -352,27 +352,44 @@ function render(){
  if(!items.length){results.innerHTML='<div class="empty">No files selected yet.</div>';return}
  results.innerHTML='';
  items.forEach((it)=>{
-  const url=URL.createObjectURL(it.file),card=document.createElement('div');card.className='card';
-  const isVisual=/\.(jpe?g|png|webp|avif|bmp|gif|tiff?|svg|ico|heic|heif)$/i.test(it.file.name);
-  card.innerHTML=`<div class="thumb">${isVisual?`<img src="${url}" alt="" onerror="this.remove();this.parentNode.innerHTML='<div class=\\'fileicon\\'>${iconFor(it.file)}</div>'">`:`<div class="fileicon">${iconFor(it.file)}</div>`}</div>
-  <div class="cardbody"><div class="name">${escapeHtml(it.file.name)}</div>
-  <div class="meta">Original: ${fmtBytes(it.file.size)}<br>Type: ${escapeHtml(typeLabel(it.file))}<br>Status: Ready</div>
-  <button class="btn red" data-remove="${it.id}">Remove</button></div>`;
+  const card=document.createElement('div');card.className='card';
+  const name=escapeHtml(it.file.name),kind=typeLabel(it.file);
+  card.innerHTML=`<div class="thumb"><div class="fileicon">${iconFor(it.file)}</div></div>
+   <div class="cardbody"><div class="name">${name}</div>
+   <div class="meta">Original: ${fmtBytes(it.file.size)}<br>Type: ${escapeHtml(kind)}<br><span class="preview-status">Status: Preparing preview…</span></div>
+   <button class="btn red" data-remove="${it.id}">Remove</button></div>`;
   results.appendChild(card);
-  // Decode HEIC/HEIF immediately when the file is added; do not wait for Convert All.
-  if(/\.heic$|\.heif$/i.test(it.file.name)){
-   const holder=card.querySelector('.thumb');
-   const thumb=document.createElement('img');thumb.alt='Loading HEIC/HEIF preview…';thumb.style.objectFit='contain';
-   holder.innerHTML='';holder.appendChild(thumb);
-   decodeHeic(it.file).then(img=>{
-    if(!holder.isConnected)return;
-    const c=document.createElement('canvas');c.width=img.naturalWidth||img.width;c.height=img.naturalHeight||img.height;
-    c.getContext('2d').drawImage(img,0,0,c.width,c.height);thumb.src=c.toDataURL('image/png');thumb.alt='HEIC/HEIF preview';
-   }).catch(err=>{
-    if(!holder.isConnected)return;
-    holder.innerHTML=`<div class="fileicon">🟦 HEIC<br><small>${escapeHtml(err.message||'Preview unavailable')}</small></div>`;
-   });
-  }
+  const thumb=card.querySelector('.thumb'),status=card.querySelector('.preview-status');
+  const ext=it.file.name.toLowerCase();
+  // HEIC/HEIF and TIFF are not consistently displayable by native <img>.
+  // Decode them locally as soon as files are selected, without waiting for Convert All.
+  (async()=>{
+   try{
+    let imgOrCanvas;
+    if(/\.tiff?$/.test(ext)) imgOrCanvas=await decodeTiff(it.file);
+    else if(/\.heic$|\.heif$/.test(ext)) imgOrCanvas=await decodeHeic(it.file);
+    else if(/\.pdf$/.test(ext)||it.file.type==='application/pdf'){
+     const pages=await decodePdf(it.file);imgOrCanvas=pages[0];
+    } else if(/\.svg$/.test(ext)) imgOrCanvas=await decodeSvg(it.file,1);
+    else imgOrCanvas=await imageFromBlob(it.file);
+    if(!card.isConnected)return;
+    let src;
+    if(imgOrCanvas instanceof HTMLCanvasElement){
+     const b=await canvasToPreviewBlob(imgOrCanvas);if(!b)throw new Error('Preview image could not be created.');src=URL.createObjectURL(b);
+    }else if(/\.heic$|\.heif$/.test(ext)){
+     // heic2any decodes HEIC/HEIF to an Image; draw that decoded image
+     // to canvas and preview the PNG, not the unsupported original file.
+     const w=imgOrCanvas.naturalWidth||imgOrCanvas.width,h=imgOrCanvas.naturalHeight||imgOrCanvas.height;
+     if(!w||!h)throw new Error('Decoded HEIC/HEIF image has no dimensions.');
+     const c=document.createElement('canvas');c.width=w;c.height=h;
+     c.getContext('2d').drawImage(imgOrCanvas,0,0,w,h);
+     const b=await canvasToPreviewBlob(c);if(!b)throw new Error('HEIC/HEIF preview image could not be created.');src=URL.createObjectURL(b);
+    }else src=URL.createObjectURL(it.file);
+    const preview=document.createElement('img');preview.alt='Image preview';preview.src=src;
+    preview.onerror=()=>{preview.remove();status.textContent='Status: Preview unavailable; conversion may still work.'};
+    thumb.replaceChildren(preview);status.textContent='Status: Preview ready';
+   }catch(err){if(card.isConnected)status.textContent='Status: Preview unavailable in this browser';}
+  })();
  });
  results.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{items=items.filter(x=>x.id!==b.dataset.remove);render()});
  stats.innerHTML=`<div class="stat">Files: <b>${items.length}</b></div><div class="stat">Selected size: <b>${fmtBytes(items.reduce((a,x)=>a+x.file.size,0))}</b></div>`;
@@ -422,25 +439,9 @@ async function decodeTiff(file){
  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba),w,h),0,0);
  return c;
 }
-let heicLibraryPromise=null;
-async function ensureHeicDecoder(){
- if(typeof window.heic2any==='function')return window.heic2any;
- if(!heicLibraryPromise){
-  heicLibraryPromise=new Promise((resolve,reject)=>{
-   const urls=['https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js','https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js'];
-   let i=0;
-   const next=()=>{
-    if(typeof window.heic2any==='function'){resolve(window.heic2any);return;}
-    if(i>=urls.length){reject(new Error('HEIC/HEIF preview decoder could not load. Check internet connection and reload the page.'));return;}
-    const script=document.createElement('script');script.src=urls[i++];script.onload=()=>typeof window.heic2any==='function'?resolve(window.heic2any):next();script.onerror=next;document.head.appendChild(script);
-   };next();
-  });
- }
- return heicLibraryPromise;
-}
 async function decodeHeic(file){
- const decoder=await ensureHeicDecoder();
- const out=await decoder({blob:file,toType:'image/png',quality:1});
+ if(!window.heic2any)throw new Error('HEIC/HEIF decoder library is unavailable.');
+ const out=await heic2any({blob:file,toType:'image/png',quality:1});
  const b=Array.isArray(out)?out[0]:out;
  return imageFromBlob(b);
 }
@@ -832,15 +833,7 @@ async function convertOne(it){
 }
 
 function showConverted(){
- // Keep selected HEIC/HEIF source previews visible after Convert All as well.
  results.innerHTML='';
- items.filter(it=>/\.heic$|\.heif$/i.test(it.file.name)).forEach(it=>{
-  const card=document.createElement('div');card.className='card';
-  card.innerHTML=`<div class="thumb"><div class="fileicon">🟦 HEIC/HEIF source preview</div></div><div class="cardbody"><div class="name">${escapeHtml(it.file.name)}</div><div class="meta">Original image preview</div></div>`;
-  results.appendChild(card);
-  const holder=card.querySelector('.thumb'),thumb=document.createElement('img');thumb.alt='Loading HEIC/HEIF preview…';thumb.style.objectFit='contain';holder.innerHTML='';holder.appendChild(thumb);
-  decodeHeic(it.file).then(img=>{if(!holder.isConnected)return;const c=document.createElement('canvas');c.width=img.naturalWidth||img.width;c.height=img.naturalHeight||img.height;c.getContext('2d').drawImage(img,0,0,c.width,c.height);thumb.src=c.toDataURL('image/png');thumb.alt='HEIC/HEIF source preview';}).catch(err=>{if(holder.isConnected)holder.innerHTML=`<div class="fileicon">🟦 HEIC<br><small>${escapeHtml(err.message||'Preview unavailable')}</small></div>`;});
- });
  converted.forEach((r,i)=>{
   const previewSource=r.previewBlob||r.blob;
   const url=URL.createObjectURL(previewSource),card=document.createElement('div');card.className='card';
