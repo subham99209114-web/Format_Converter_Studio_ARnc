@@ -377,12 +377,32 @@ async function imageFromBlob(blob){
   img.src=url;
  });
 }
+async function ensureTiffDecoder(){
+ if(window.UTIF && typeof window.UTIF.decode==='function')return window.UTIF;
+ // Recover automatically if the primary CDN was blocked or failed to load.
+ const urls=[
+  'https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.min.js',
+  'https://unpkg.com/utif@3.1.0/UTIF.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/UTIF.js/3.1.0/UTIF.min.js'
+ ];
+ for(const src of urls){
+  try{
+   await new Promise((resolve,reject)=>{
+    const script=document.createElement('script');script.src=src;script.async=true;
+    script.onload=()=>resolve();script.onerror=()=>reject(new Error('Could not load TIFF decoder from '+src));
+    document.head.appendChild(script);
+   });
+   if(window.UTIF && typeof window.UTIF.decode==='function')return window.UTIF;
+  }catch(e){ /* try next trusted CDN */ }
+ }
+ throw new Error('TIFF decoder could not be loaded. Check internet/CDN access and reload the page.');
+}
 async function decodeTiff(file){
- if(!window.UTIF)throw new Error('TIFF decoder library is unavailable.');
- const buf=await file.arrayBuffer(),ifds=UTIF.decode(buf);
+ const TIFF=await ensureTiffDecoder();
+ const buf=await file.arrayBuffer(),ifds=TIFF.decode(buf);
  if(!ifds.length)throw new Error('No TIFF image found.');
- UTIF.decodeImage(buf,ifds[0]);
- const rgba=UTIF.toRGBA8(ifds[0]),w=ifds[0].width,h=ifds[0].height;
+ TIFF.decodeImage(buf,ifds[0]);
+ const rgba=TIFF.toRGBA8(ifds[0]),w=ifds[0].width,h=ifds[0].height;
  const c=document.createElement('canvas');c.width=w;c.height=h;
  c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(rgba),w,h));
  return c;
