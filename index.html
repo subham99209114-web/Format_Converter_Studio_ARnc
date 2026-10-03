@@ -27,90 +27,91 @@
 
 <style>
 *{box-sizing:border-box}
+html{width:100%;min-height:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%;scroll-behavior:smooth}
 :root{
  --bg1:#071b14;--bg2:#32104d;--card:rgba(255,255,255,.10);
  --line:rgba(255,255,255,.16);--text:#f8fafc;--muted:#cbd5e1;
  --green:#22c55e;--blue:#3b82f6;--orange:#f97316;--red:#ef4444;
 }
-body{margin:0;min-height:100vh;width:100%;font-family:Inter,Arial,sans-serif;color:var(--text);
- background:linear-gradient(135deg,#006400,#800080);padding:14px}
-.container{width:100%;max-width:none;margin:0 auto;background:rgba(255,255,255,.10);
+body{margin:0;min-height:100vh;width:100%;min-width:0;font-family:Inter,Arial,sans-serif;color:var(--text);
+ background:linear-gradient(135deg,#006400,#800080);padding:14px;overflow-x:hidden}
+button,input,select{font:inherit}
+button,label,.btn{touch-action:manipulation}
+.container{width:100%;max-width:1800px;margin:0 auto;background:rgba(255,255,255,.10);
  border:1px solid rgba(255,255,255,.12);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
  border-radius:24px;box-shadow:0 20px 60px rgba(0,0,0,.32);overflow:hidden}
 header{padding:26px 28px;border-bottom:1px solid var(--line)}
-h1{margin:0;font-size:clamp(25px,4vw,38px)}
-header p{margin:8px 0 0;color:var(--muted)}
-.panel{padding:22px 28px}
+h1{margin:0;font-size:clamp(25px,4vw,38px);line-height:1.15;overflow-wrap:anywhere}
+header p{margin:8px 0 0;color:var(--muted);line-height:1.55}
+.panel{padding:22px 28px;min-width:0}
 .drop{border:2px dashed #60a5fa;border-radius:18px;padding:32px 18px;text-align:center;
- background:rgba(0,0,0,.10);transition:.2s}
+ background:rgba(0,0,0,.10);transition:.2s;min-width:0}
 .drop.drag{background:rgba(96,165,250,.16);transform:scale(1.005)}
-.drop .icon{font-size:45px}.drop h2{margin:8px 0 5px}.drop p{color:var(--muted);margin:0 0 17px}
+.drop .icon{font-size:45px}.drop h2{margin:8px 0 5px}.drop p{color:var(--muted);margin:0 0 17px;line-height:1.55}
 input[type=file]{display:none}
-.btn{border:0;border-radius:11px;padding:11px 16px;font-weight:700;color:#fff;cursor:pointer;
- background:#334155;transition:.2s}.btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:11px;padding:11px 16px;font-weight:700;color:#fff;cursor:pointer;transition:.2s;min-height:44px;text-align:center}
+.btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
 .btn.green{background:var(--green);color:#06240f}.btn.blue{background:var(--blue)}
 .btn.orange{background:var(--orange)}.btn.red{background:var(--red)}
-.controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:20px}
-.control{background:rgba(0,0,0,.13);border:1px solid var(--line);border-radius:15px;padding:14px}
+.controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:20px;min-width:0}
+.control{background:rgba(0,0,0,.13);border:1px solid var(--line);border-radius:15px;padding:14px;min-width:0}
 .control label{display:block;font-size:12px;color:#dbeafe;margin-bottom:7px;font-weight:700}
-select,input[type=number],input[type=text]{width:100%;padding:10px 11px;border-radius:9px;
+select,input[type=number],input[type=text]{width:100%;min-width:0;max-width:100%;padding:10px 11px;border-radius:9px;
  border:1px solid #64748b;background:rgba(15,23,42,.72);color:#fff;outline:none}
-input[type=range]{width:100%}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
-.switch{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
-.switch input{accent-color:var(--green)}
-.stats{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
-.stat{background:rgba(0,0,0,.14);border:1px solid var(--line);padding:9px 12px;border-radius:10px;font-size:13px}
-.progress{height:9px;background:rgba(255,255,255,.15);border-radius:10px;overflow:hidden;margin-top:18px;display:none}
-.progress div{height:100%;width:0;background:#22c55e;transition:.15s}
-.results{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:15px;margin-top:20px}
-.card{background:rgba(0,0,0,.18);border:1px solid var(--line);border-radius:16px;overflow:hidden}
-.thumb{height:190px;background:#0f172a;display:flex;align-items:center;justify-content:center;position:relative}
-.thumb img{max-width:100%;max-height:100%;object-fit:contain}
-.thumb .fileicon{font-size:55px}
-.cardbody{padding:13px}.name{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.meta{font-size:12px;color:var(--muted);line-height:1.7;margin:7px 0 10px}
-.card .btn{width:100%}.empty{text-align:center;color:var(--muted);padding:30px;border:1px dashed var(--line);
- border-radius:14px;margin-top:18px}
-.badges{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
-.badge{font-size:11px;padding:6px 9px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid var(--line)}
+input[type=range]{width:100%;min-width:0;accent-color:var(--green)}
+select:focus,input[type=number]:focus,input[type=text]:focus,input[type=range]:focus{outline:2px solid rgba(96,165,250,.65);outline-offset:1px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;min-width:0}.row>*{min-width:0}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;align-items:center;min-width:0}
+.actions .btn{flex:0 1 auto}.switch{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;line-height:1.45;min-width:0}
+.switch input{accent-color:var(--green);width:18px;height:18px;flex:0 0 auto}
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}.stat{background:rgba(0,0,0,.14);border:1px solid var(--line);padding:9px 12px;border-radius:10px;font-size:13px;min-width:0}
+.progress{height:9px;background:rgba(255,255,255,.15);border-radius:10px;overflow:hidden;margin-top:18px;display:none}.progress div{height:100%;width:0;background:#22c55e;transition:.15s}
+.results{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:15px;margin-top:20px;min-width:0}
+.card{background:rgba(0,0,0,.18);border:1px solid var(--line);border-radius:16px;overflow:hidden;min-width:0}
+.thumb{height:190px;background:#0f172a;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.thumb img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}.thumb .fileicon{font-size:55px}
+.cardbody{padding:13px;min-width:0}.name{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:12px;color:var(--muted);line-height:1.7;margin:7px 0 10px;overflow-wrap:anywhere}
+.card .btn{width:100%}.empty{text-align:center;color:var(--muted);padding:30px;border:1px dashed var(--line);border-radius:14px;margin-top:18px}
+.badges{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}.badge{font-size:11px;padding:6px 9px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid var(--line)}
 .badge.ok{background:rgba(34,197,94,.16)}.badge.warn{background:rgba(249,115,22,.16)}
-.note{display:block;color:#cbd5e1;margin-top:7px;line-height:1.5;font-size:12px}
-.section-title{margin:22px 0 0;font-size:17px}
-footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(--line)}
-#pdfOptions{display:none}
-@media(max-width:1100px){
- .controls{grid-template-columns:repeat(3,minmax(0,1fr))}
- .results{grid-template-columns:repeat(2,minmax(0,1fr))}
+.note{display:block;color:#cbd5e1;margin-top:7px;line-height:1.5;font-size:12px;overflow-wrap:anywhere}.section-title{margin:22px 0 0;font-size:17px}
+footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(--line);min-width:0}
+.footer-about,.footer-privacy{overflow-wrap:anywhere;word-break:normal}.footer-about p,.footer-privacy p{margin-top:0}
+#pdfOptions{display:none}.dng-note{margin-top:8px;font-size:.82rem;opacity:.78}
+
+@media(max-width:1200px){
+ body{padding:12px}.controls{grid-template-columns:repeat(3,minmax(0,1fr))}.results{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(max-width:850px){
- body{padding:10px}
- .controls{grid-template-columns:repeat(2,minmax(0,1fr))}
- .results{grid-template-columns:repeat(2,minmax(0,1fr))}
- .thumb{height:230px}
+ body{padding:8px}.container{border-radius:18px}.panel,header,footer{padding:20px}
+ .controls{grid-template-columns:repeat(2,minmax(0,1fr))}.results{grid-template-columns:repeat(2,minmax(0,1fr))}.thumb{height:220px}
+ .actions .btn{flex:1 1 180px}.switch{flex:1 1 100%}
 }
-@media(max-width:560px){
- body{padding:0}
- .container{border-radius:0;min-height:100vh}
- .panel,header,footer{padding:16px}
- .controls{grid-template-columns:1fr}
- .results{grid-template-columns:1fr;gap:14px}
- .thumb{height:240px;min-height:210px}
- .drop{padding:24px 12px}
- .btn{flex:1;min-width:130px}
- .actions .btn{min-width:145px}
- .actions{gap:8px}
- .stat{flex:1}
- .row{width:100%}
- .row input{min-width:0;flex:1}
+@media(max-width:600px){
+ body{padding:0;background:linear-gradient(160deg,#006400,#800080);background-attachment:fixed}
+ .container{width:100%;max-width:none;min-height:100vh;border-radius:0;border-left:0;border-right:0}
+ header,.panel,footer{padding:16px}
+ h1{font-size:clamp(23px,7vw,31px)}header p{font-size:14px}
+ .drop{padding:24px 12px;border-radius:15px}.drop .icon{font-size:38px}.drop h2{font-size:21px}.drop p{font-size:13px}
+ .controls{grid-template-columns:1fr;gap:11px}.control{padding:13px}
+ select,input[type=number],input[type=text]{font-size:16px;min-height:44px}
+ .row{gap:8px}.row input{flex:1 1 120px}
+ .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.actions .btn{width:100%;min-width:0;flex:initial}
+ .actions .switch{grid-column:1/-1;padding-top:2px}
+ .stats{display:grid;grid-template-columns:1fr 1fr;gap:8px}.stat{font-size:12px;padding:8px 9px}
+ .results{grid-template-columns:1fr;gap:12px}.thumb{height:min(62vw,260px);min-height:190px}.cardbody{padding:12px}
+ .badges{gap:5px}.badge{font-size:10px;padding:5px 7px}
+ footer{font-size:12px}.footer-about,.footer-privacy{padding:18px 0!important;margin-top:18px!important}.footer-about h2,.footer-privacy h2{font-size:21px!important}
+}
+@media(max-width:380px){
+ .panel,header,footer{padding:13px}.actions{grid-template-columns:1fr}.actions .switch{grid-column:auto}.stats{grid-template-columns:1fr}
+ .thumb{height:210px}.drop{padding:20px 9px}.btn{padding:10px 12px}
 }
 @media(orientation:landscape) and (max-height:600px){
- body{padding:6px}
- .container{border-radius:14px}
- .thumb{height:190px;min-height:170px}
- header{padding:18px 22px}
- .panel{padding:18px 22px}
+ body{padding:6px}.container{border-radius:14px}.thumb{height:180px;min-height:160px}.drop{padding:20px 12px}
+ header{padding:16px 20px}.panel{padding:16px 20px}.controls{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
 </style>
 </head>
 <body>
@@ -122,18 +123,18 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
  <span class="badge ok">JPG / JPEG</span><span class="badge ok">PNG</span><span class="badge ok">WebP</span>
  <span class="badge ok">AVIF</span><span class="badge">GIF</span><span class="badge">TIFF</span>
  <span class="badge">SVG</span><span class="badge">ICO</span><span class="badge">PDF</span>
- <span class="badge warn">HEIC / HEIF input</span><span class="badge warn">RAW input*</span>
-</div>
+ <span class="badge warn">HEIC / HEIF input</span><span class="badge warn">Any extension input</span><span class="badge warn">RAW input*</span>
+</div><div class="dng-note">DNG/RAW files are accepted. DNG preview depends on the browser or available RAW decoder.</div>
 </header>
 
 <div class="panel">
 <div id="drop" class="drop">
  <div class="icon">📤</div>
  <h2>Choose Files</h2>
- <p>JPG, JPEG, PNG, WebP, AVIF, BMP, GIF, TIFF, SVG, ICO, PDF, HEIC/HEIF and supported RAW camera files</p>
+ <p>Any image format/extension can be selected. Browser-supported images, plus built-in TIFF/HEIC/SVG/PDF decoders, can be previewed and converted.</p>
  <label class="btn blue" for="files">📁 Choose Files</label>
- <input id="files" type="file" accept="image/*,application/pdf,.jpg,.jpeg,.png,.webp,.avif,.bmp,.gif,.tif,.tiff,.svg,.ico,.pdf,.heic,.heif,.dng,.cr2,.cr3,.nef,.arw,.orf,.rw2,.raf,.pef,.srw,.raw" multiple>
- <small class="note">Files stay in your browser during processing. HEIC/HEIF, TIFF, PDF and SVG use browser-side decoders; RAW support depends on the browser/decoder available for that camera format.</small>
+ <input id="files" type="file" accept="*/*" multiple>
+ <small class="note">Upload is extension-independent. The app never rejects a file only because of its extension. Preview/conversion depends on the actual file data and the browser/decoder available for that format.</small>
 </div>
 
 <h3 class="section-title">Conversion Studio</h3>
@@ -221,7 +222,7 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
 
 <div class="progress" id="progress"><div id="bar"></div></div>
 <div class="stats" id="stats"></div>
-<div id="results"><div class="empty">No files selected yet.</div></div>
+<div id="results"><div class="empty">No files selected yet.</div></div><small class="note">Upload accepts any file extension. A visual preview is shown whenever the browser or an included decoder can read the file contents.</small>
 </div>
 
 <footer>
@@ -324,9 +325,10 @@ function isSupportedName(n){
  return /\.(jpe?g|png|webp|avif|bmp|gif|tiff?|svg|ico|pdf|heic|heif|dng|crw|cr2|cr3|nef|arw|orf|rw2|raf|pef|srw|raw)$/i.test(n);
 }
 function addFiles(fs){
- const accepted=fs.filter(f=>f.type.startsWith('image/')||f.type==='application/pdf'||isSupportedName(f.name));
- items.push(...accepted.map(file=>({file,id:crypto.randomUUID()})));
- render();
+  // Accept every file type/extension. Decoding support is checked later.
+  const accepted=fs.filter(f=>f && typeof f.size==='number');
+  items.push(...accepted.map(file=>({file,id:crypto.randomUUID()})));
+  render();
 }
 function fmtBytes(n){
  if(!n)return '0 B';const u=['B','KB','MB','GB'];const i=Math.min(3,Math.floor(Math.log(n)/Math.log(1024)));
@@ -338,30 +340,143 @@ function extForMime(m){
  'image/gif':'gif','image/tiff':'tiff','image/x-icon':'ico','image/svg+xml':'svg','image/heic':'heic','image/heif':'heif','image/x-adobe-dng':'dng','application/pdf':'pdf'})[m]||'bin';
 }
 function typeLabel(file){
- const n=file.name.toLowerCase();
- if(/\.pdf$/.test(n)||file.type==='application/pdf')return 'PDF';
- if(/\.heic$|\.heif$/.test(n))return 'HEIC/HEIF';
- if(/\.tiff?$/.test(n))return 'TIFF';
- if(/\.svg$/.test(n))return 'SVG';
- if(/\.ico$/.test(n))return 'ICO';
- if(/\.(dng|crw|cr2|cr3|nef|arw|orf|rw2|raf|pef|srw|raw)$/.test(n))return 'RAW';
- return (file.type||'image').replace('image/','').toUpperCase();
+  const n=file.name.toLowerCase();
+  if(/\.pdf$/.test(n)||file.type==='application/pdf')return 'PDF';
+  if(/\.heic$|\.heif$/.test(n)||file.type==='image/heic'||file.type==='image/heif')return 'HEIC/HEIF';
+  if(/\.tiff?$/.test(n)||file.type==='image/tiff')return 'TIFF';
+  if(/\.svg$/.test(n)||file.type==='image/svg+xml')return 'SVG';
+  if(/\.ico$/.test(n)||file.type==='image/x-icon')return 'ICO';
+  if(/\.(dng|crw|cr2|cr3|nef|arw|orf|rw2|raf|pef|srw|raw|nrw|srf|sr2|3fr|iiq|kdc|dcs|dcr|erf|mef|mrw|mos)$/i.test(n))return 'RAW';
+  if(file.type) return file.type.replace(/^image\//,'').toUpperCase();
+  return n.includes('.') ? n.split('.').pop().toUpperCase() : 'UNKNOWN';
 }
 function iconFor(file){const t=typeLabel(file);return t==='PDF'?'📄':t==='RAW'?'📷':t==='HEIC/HEIF'?'🟦':t==='SVG'?'🔷':t==='TIFF'?'🖼️':'🖼️'}
-function render(){
- if(!items.length){results.innerHTML='<div class="empty">No files selected yet.</div>';return}
- results.innerHTML='';
- items.forEach((it)=>{
-  const url=URL.createObjectURL(it.file),card=document.createElement('div');card.className='card';
-  const isVisual=/\.(jpe?g|png|webp|avif|bmp|gif|tiff?|svg|ico|heic|heif)$/i.test(it.file.name);
-  card.innerHTML=`<div class="thumb">${isVisual?`<img src="${url}" alt="" onerror="this.remove();this.parentNode.innerHTML='<div class=\\'fileicon\\'>${iconFor(it.file)}</div>'">`:`<div class="fileicon">${iconFor(it.file)}</div>`}</div>
-  <div class="cardbody"><div class="name">${escapeHtml(it.file.name)}</div>
-  <div class="meta">Original: ${fmtBytes(it.file.size)}<br>Type: ${escapeHtml(typeLabel(it.file))}<br>Status: Ready</div>
-  <button class="btn red" data-remove="${it.id}">Remove</button></div>`;
-  results.appendChild(card);
- });
- results.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{items=items.filter(x=>x.id!==b.dataset.remove);render()});
- stats.innerHTML=`<div class="stat">Files: <b>${items.length}</b></div><div class="stat">Selected size: <b>${fmtBytes(items.reduce((a,x)=>a+x.file.size,0))}</b></div>`;
+const previewCache=new Map();
+
+
+async function decodeDngForPreview(file){
+  // DNG is a RAW camera format. Browsers do not natively decode it reliably.
+  // Try the included/available RAW decoder first, then attempt browser-native decoding.
+  const candidates = [
+    ()=>window.decodeDng && window.decodeDng(file),
+    ()=>window.decodeRAW && window.decodeRAW(file),
+    ()=>window.RawImage && window.RawImage.decode ? window.RawImage.decode(file) : null
+  ];
+  for(const fn of candidates){
+    try{
+      const r = await fn();
+      if(!r) continue;
+      if(r instanceof Blob) return r;
+      if(r instanceof ImageBitmap) return await canvasToPreviewBlob(r);
+      if(r.canvas instanceof HTMLCanvasElement) return await new Promise((resolve,reject)=>
+        r.canvas.toBlob(b=>b?resolve(b):reject(new Error('DNG preview canvas failed')),'image/png')
+      );
+      if(r instanceof HTMLCanvasElement) return await new Promise((resolve,reject)=>
+        r.toBlob(b=>b?resolve(b):reject(new Error('DNG preview canvas failed')),'image/png')
+      );
+    }catch(e){}
+  }
+  // Some DNG files contain an embedded JPEG preview. Browser image decoding
+  // can expose it in some environments even when the RAW sensor data is not decoded.
+  try{
+    return await imageFromBlob(file);
+  }catch(e){
+    throw new Error('DNG preview is not supported by this browser/decoder');
+  }
+}
+
+async function getUploadPreview(it){
+  if(previewCache.has(it.id)) return previewCache.get(it.id);
+  const file=it.file, name=file.name.toLowerCase();
+  let result={kind:'icon',url:null,label:'Preview unavailable'};
+
+  try{
+    let blobForPreview=file;
+    if(/\.pdf$/.test(name)||file.type==='application/pdf'){
+      if(!window.pdfjsLib) throw new Error('PDF decoder unavailable');
+      const data=await file.arrayBuffer();
+      const pdf=await pdfjsLib.getDocument({data}).promise;
+      const page=await pdf.getPage(1);
+      const vp=page.getViewport({scale:1.35});
+      const c=document.createElement('canvas');
+      c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height);
+      await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+      blobForPreview=await canvasToPreviewBlob(c);
+      result={kind:'image',url:URL.createObjectURL(blobForPreview),label:'PDF preview'};
+    }else if(/\.tiff?$/.test(name)||file.type==='image/tiff'){
+      const c=await decodeTiff(file);
+      blobForPreview=await canvasToPreviewBlob(c);
+      result={kind:'image',url:URL.createObjectURL(blobForPreview),label:'TIFF preview'};
+    }else if(/\.heic$|\.heif$/.test(name)||file.type==='image/heic'||file.type==='image/heif'){
+      const img=await decodeHeic(file);
+      const c=document.createElement('canvas');
+      c.width=img.naturalWidth||img.width; c.height=img.naturalHeight||img.height;
+      c.getContext('2d').drawImage(img,0,0);
+      blobForPreview=await canvasToPreviewBlob(c);
+      result={kind:'image',url:URL.createObjectURL(blobForPreview),label:'HEIC/HEIF preview'};
+    }else{
+      // Try every uploaded file as an image, regardless of extension.
+      await imageFromBlob(file);
+      result={kind:'image',url:URL.createObjectURL(file),label:'Browser image preview'};
+    }
+  }catch(e){}
+
+  previewCache.set(it.id,result);
+  return result;
+}
+
+async function render(){
+  if(!items.length){
+    results.innerHTML='<div class="empty">No files selected yet.</div>';
+    stats.innerHTML='';
+    return;
+  }
+
+  results.innerHTML='';
+  stats.innerHTML=`<div class="stat">Files: <b>${items.length}</b></div>
+    <div class="stat">Selected size: <b>${fmtBytes(items.reduce((a,x)=>a+x.file.size,0))}</b></div>`;
+
+  const cards=items.map(it=>{
+    const card=document.createElement('div');
+    card.className='card';
+    card.innerHTML=`<div class="thumb"><div class="fileicon">⏳</div></div>
+      <div class="cardbody"><div class="name">${escapeHtml(it.file.name)}</div>
+      <div class="meta">Original: ${fmtBytes(it.file.size)}<br>
+      Type: ${escapeHtml(typeLabel(it.file))}<br>
+      MIME: ${escapeHtml(it.file.type||'unknown')}<br>
+      Status: Checking preview…</div>
+      <button class="btn red" data-remove="${it.id}">Remove</button></div>`;
+    results.appendChild(card);
+    return {it,card};
+  });
+
+  cards.forEach(async ({it,card})=>{
+    const preview=await getUploadPreview(it);
+    const thumb=card.querySelector('.thumb'), meta=card.querySelector('.meta');
+
+    if(preview.kind==='image' && preview.url){
+      thumb.innerHTML=`<img src="${preview.url}" alt="${escapeHtml(it.file.name)}" title="${escapeHtml(preview.label)}">`;
+      meta.innerHTML=`Original: ${fmtBytes(it.file.size)}<br>
+        Type: ${escapeHtml(typeLabel(it))}<br>
+        MIME: ${escapeHtml(it.file.type||'unknown')}<br>
+        Status: <b>Preview ready</b>`;
+    }else{
+      thumb.innerHTML=`<div class="fileicon">${iconFor(it.file)}</div>`;
+      meta.innerHTML=`Original: ${fmtBytes(it.file.size)}<br>
+        Type: ${escapeHtml(typeLabel(it))}<br>
+        MIME: ${escapeHtml(it.file.type||'unknown')}<br>
+        Status: <b>Uploaded — preview not supported</b>`;
+    }
+  });
+
+  results.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{
+    const id=b.dataset.remove;
+    const cached=previewCache.get(id);
+    if(cached?.url) try{URL.revokeObjectURL(cached.url)}catch(e){}
+    previewCache.delete(id);
+    items=items.filter(x=>x.id!==id);
+    render();
+  });
 }
 function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 
@@ -417,15 +532,27 @@ async function decodeSvg(file,scale){
  }finally{URL.revokeObjectURL(url)}
 }
 async function decodeAny(file){
- const name=file.name.toLowerCase();
- if(/\.pdf$/.test(name)||file.type==='application/pdf')return {pages:await decodePdf(file),source:'PDF'};
- if(/\.tiff?$/.test(name))return {pages:[await decodeTiff(file)],source:'TIFF'};
- if(/\.heic$|\.heif$/.test(name))return {pages:[await decodeHeic(file)],source:'HEIC/HEIF'};
- if(/\.svg$/.test(name))return {pages:[await decodeSvg(file,+$('svgScale').value)],source:'SVG'};
- try{return {pages:[await imageFromBlob(file)],source:typeLabel(file)}}
- catch(e){
-  throw new Error('This RAW or image format cannot be decoded by the current browser. Try converting the RAW file to DNG/JPG/PNG first, or use a browser with native RAW support.');
- }
+  const name=file.name.toLowerCase();
+  const mime=(file.type||'').toLowerCase();
+
+  if(/\.pdf$/.test(name)||mime==='application/pdf')
+    return {pages:await decodePdf(file),source:'PDF'};
+  if(/\.tiff?$/.test(name)||mime==='image/tiff')
+    return {pages:[await decodeTiff(file)],source:'TIFF'};
+  if(/\.heic$|\.heif$/.test(name)||mime==='image/heic'||mime==='image/heif')
+    return {pages:[await decodeHeic(file)],source:'HEIC/HEIF'};
+  if(/\.svg$/.test(name)||mime==='image/svg+xml')
+    return {pages:[await decodeSvg(file,+$('svgScale').value)],source:'SVG'};
+
+  // Do not depend on the extension: try the browser image decoder.
+  try{
+    const img=await imageFromBlob(file);
+    return {pages:[img],source:typeLabel(file)};
+  }catch(e){
+    if(mime.startsWith('image/'))
+      throw new Error('The browser recognizes this as an image, but could not decode its contents.');
+    throw new Error('This file format is not decodable by the current browser/available decoder.');
+  }
 }
 function toCanvas(source,w,h){
  const c=document.createElement('canvas');c.width=w;c.height=h;
@@ -848,7 +975,12 @@ $('zip').onclick=async()=>{
  const zip=new JSZip();converted.forEach(r=>zip.file(r.name,r.blob));
  const blob=await zip.generateAsync({type:'blob'});saveBlob(blob,'all-format-converted.zip');
 };
-$('clear').onclick=()=>{items=[];converted=[];render();stats.innerHTML='';$('progress').style.display='none';$('bar').style.width='0%';files.value=''};
+$('clear').onclick=()=>{
+  previewCache.forEach(v=>{if(v?.url)try{URL.revokeObjectURL(v.url)}catch(e){}});
+  previewCache.clear();
+  items=[];converted=[];render();stats.innerHTML='';
+  $('progress').style.display='none';$('bar').style.width='0%';files.value='';
+};
 render();
 </script>
 </body>
