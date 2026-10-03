@@ -359,6 +359,16 @@ function render(){
   <div class="meta">Original: ${fmtBytes(it.file.size)}<br>Type: ${escapeHtml(typeLabel(it.file))}<br>Status: Ready</div>
   <button class="btn red" data-remove="${it.id}">Remove</button></div>`;
   results.appendChild(card);
+  // HEIC/HEIF often cannot be displayed by the browser directly; decode a preview thumbnail locally.
+  if(/\.heic$|\.heif$/i.test(it.file.name)){
+   const thumb=card.querySelector('.thumb img');
+   if(thumb){thumb.alt='Loading HEIC/HEIF preview…';thumb.style.objectFit='contain';
+    decodeHeic(it.file).then(img=>{
+     const c=document.createElement('canvas');c.width=img.naturalWidth||img.width;c.height=img.naturalHeight||img.height;
+     c.getContext('2d').drawImage(img,0,0,c.width,c.height);thumb.src=c.toDataURL('image/png');thumb.alt='HEIC/HEIF preview';
+    }).catch(()=>{thumb.remove();const icon=document.createElement('div');icon.className='fileicon';icon.textContent='🟦 HEIC';card.querySelector('.thumb').appendChild(icon);});
+   }
+  }
  });
  results.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{items=items.filter(x=>x.id!==b.dataset.remove);render()});
  stats.innerHTML=`<div class="stat">Files: <b>${items.length}</b></div><div class="stat">Selected size: <b>${fmtBytes(items.reduce((a,x)=>a+x.file.size,0))}</b></div>`;
