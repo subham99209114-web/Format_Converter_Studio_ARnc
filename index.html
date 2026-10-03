@@ -122,7 +122,7 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
  <span class="badge ok">JPG / JPEG</span><span class="badge ok">PNG</span><span class="badge ok">WebP</span>
  <span class="badge ok">AVIF</span><span class="badge">GIF</span><span class="badge">TIFF</span>
  <span class="badge">SVG</span><span class="badge">ICO</span><span class="badge">PDF</span>
- <span class="badge warn">HEIC / HEIF input</span><span class="badge warn">Any extension input</span><span class="badge warn">RAW input*</span>
+ <span class="badge warn">HEIC / HEIF input</span><span class="badge warn">RAW input*</span>
 </div>
 </header>
 
@@ -130,10 +130,10 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
 <div id="drop" class="drop">
  <div class="icon">📤</div>
  <h2>Choose Files</h2>
- <p>Any image format/extension can be selected. Browser-supported images, plus built-in TIFF/HEIC/SVG/PDF decoders, can be previewed and converted.</p>
+ <p>JPG, JPEG, PNG, WebP, AVIF, BMP, GIF, TIFF, SVG, ICO, PDF, HEIC/HEIF and supported RAW camera files</p>
  <label class="btn blue" for="files">📁 Choose Files</label>
- <input id="files" type="file" accept="*/*" multiple>
- <small class="note">Upload is extension-independent. The app never rejects a file only because of its extension. Preview/conversion depends on the actual file data and the browser/decoder available for that format.</small>
+ <input id="files" type="file" accept="image/*,application/pdf,.jpg,.jpeg,.png,.webp,.avif,.bmp,.gif,.tif,.tiff,.svg,.ico,.pdf,.heic,.heif,.dng,.cr2,.cr3,.nef,.arw,.orf,.rw2,.raf,.pef,.srw,.raw" multiple>
+ <small class="note">Files stay in your browser during processing. HEIC/HEIF, TIFF, PDF and SVG use browser-side decoders; RAW support depends on the browser/decoder available for that camera format.</small>
 </div>
 
 <h3 class="section-title">Conversion Studio</h3>
@@ -221,7 +221,7 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
 
 <div class="progress" id="progress"><div id="bar"></div></div>
 <div class="stats" id="stats"></div>
-<div id="results"><div class="empty">No files selected yet.</div></div><small class="note">Upload accepts any file extension. A visual preview is shown whenever the browser or an included decoder can read the file contents.</small>
+<div id="results"><div class="empty">No files selected yet.</div></div>
 </div>
 
 <footer>
@@ -324,10 +324,9 @@ function isSupportedName(n){
  return /\.(jpe?g|png|webp|avif|bmp|gif|tiff?|svg|ico|pdf|heic|heif|dng|crw|cr2|cr3|nef|arw|orf|rw2|raf|pef|srw|raw)$/i.test(n);
 }
 function addFiles(fs){
-  // Accept every file type/extension. Decoding support is checked later.
-  const accepted=fs.filter(f=>f && typeof f.size==='number');
-  items.push(...accepted.map(file=>({file,id:crypto.randomUUID()})));
-  render();
+ const accepted=fs.filter(f=>f.type.startsWith('image/')||f.type==='application/pdf'||isSupportedName(f.name));
+ items.push(...accepted.map(file=>({file,id:crypto.randomUUID()})));
+ render();
 }
 function fmtBytes(n){
  if(!n)return '0 B';const u=['B','KB','MB','GB'];const i=Math.min(3,Math.floor(Math.log(n)/Math.log(1024)));
@@ -339,111 +338,30 @@ function extForMime(m){
  'image/gif':'gif','image/tiff':'tiff','image/x-icon':'ico','image/svg+xml':'svg','image/heic':'heic','image/heif':'heif','image/x-adobe-dng':'dng','application/pdf':'pdf'})[m]||'bin';
 }
 function typeLabel(file){
-  const n=file.name.toLowerCase();
-  if(/\.pdf$/.test(n)||file.type==='application/pdf')return 'PDF';
-  if(/\.heic$|\.heif$/.test(n)||file.type==='image/heic'||file.type==='image/heif')return 'HEIC/HEIF';
-  if(/\.tiff?$/.test(n)||file.type==='image/tiff')return 'TIFF';
-  if(/\.svg$/.test(n)||file.type==='image/svg+xml')return 'SVG';
-  if(/\.ico$/.test(n)||file.type==='image/x-icon')return 'ICO';
-  if(/\.(dng|crw|cr2|cr3|nef|arw|orf|rw2|raf|pef|srw|raw|nrw|srf|sr2|3fr|iiq|kdc|dcs|dcr|erf|mef|mrw|mos)$/i.test(n))return 'RAW';
-  if(file.type) return file.type.replace(/^image\//,'').toUpperCase();
-  return n.includes('.') ? n.split('.').pop().toUpperCase() : 'UNKNOWN';
+ const n=file.name.toLowerCase();
+ if(/\.pdf$/.test(n)||file.type==='application/pdf')return 'PDF';
+ if(/\.heic$|\.heif$/.test(n))return 'HEIC/HEIF';
+ if(/\.tiff?$/.test(n))return 'TIFF';
+ if(/\.svg$/.test(n))return 'SVG';
+ if(/\.ico$/.test(n))return 'ICO';
+ if(/\.(dng|crw|cr2|cr3|nef|arw|orf|rw2|raf|pef|srw|raw)$/.test(n))return 'RAW';
+ return (file.type||'image').replace('image/','').toUpperCase();
 }
 function iconFor(file){const t=typeLabel(file);return t==='PDF'?'📄':t==='RAW'?'📷':t==='HEIC/HEIF'?'🟦':t==='SVG'?'🔷':t==='TIFF'?'🖼️':'🖼️'}
-const previewCache=new Map();
-
-async function getUploadPreview(it){
-  if(previewCache.has(it.id)) return previewCache.get(it.id);
-  const file=it.file, name=file.name.toLowerCase();
-  let result={kind:'icon',url:null,label:'Preview unavailable'};
-
-  try{
-    let blobForPreview=file;
-    if(/\.pdf$/.test(name)||file.type==='application/pdf'){
-      if(!window.pdfjsLib) throw new Error('PDF decoder unavailable');
-      const data=await file.arrayBuffer();
-      const pdf=await pdfjsLib.getDocument({data}).promise;
-      const page=await pdf.getPage(1);
-      const vp=page.getViewport({scale:1.35});
-      const c=document.createElement('canvas');
-      c.width=Math.ceil(vp.width); c.height=Math.ceil(vp.height);
-      await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
-      blobForPreview=await canvasToPreviewBlob(c);
-      result={kind:'image',url:URL.createObjectURL(blobForPreview),label:'PDF preview'};
-    }else if(/\.tiff?$/.test(name)||file.type==='image/tiff'){
-      const c=await decodeTiff(file);
-      blobForPreview=await canvasToPreviewBlob(c);
-      result={kind:'image',url:URL.createObjectURL(blobForPreview),label:'TIFF preview'};
-    }else if(/\.heic$|\.heif$/.test(name)||file.type==='image/heic'||file.type==='image/heif'){
-      const img=await decodeHeic(file);
-      const c=document.createElement('canvas');
-      c.width=img.naturalWidth||img.width; c.height=img.naturalHeight||img.height;
-      c.getContext('2d').drawImage(img,0,0);
-      blobForPreview=await canvasToPreviewBlob(c);
-      result={kind:'image',url:URL.createObjectURL(blobForPreview),label:'HEIC/HEIF preview'};
-    }else{
-      // Try every uploaded file as an image, regardless of extension.
-      await imageFromBlob(file);
-      result={kind:'image',url:URL.createObjectURL(file),label:'Browser image preview'};
-    }
-  }catch(e){}
-
-  previewCache.set(it.id,result);
-  return result;
-}
-
-async function render(){
-  if(!items.length){
-    results.innerHTML='<div class="empty">No files selected yet.</div>';
-    stats.innerHTML='';
-    return;
-  }
-
-  results.innerHTML='';
-  stats.innerHTML=`<div class="stat">Files: <b>${items.length}</b></div>
-    <div class="stat">Selected size: <b>${fmtBytes(items.reduce((a,x)=>a+x.file.size,0))}</b></div>`;
-
-  const cards=items.map(it=>{
-    const card=document.createElement('div');
-    card.className='card';
-    card.innerHTML=`<div class="thumb"><div class="fileicon">⏳</div></div>
-      <div class="cardbody"><div class="name">${escapeHtml(it.file.name)}</div>
-      <div class="meta">Original: ${fmtBytes(it.file.size)}<br>
-      Type: ${escapeHtml(typeLabel(it.file))}<br>
-      MIME: ${escapeHtml(it.file.type||'unknown')}<br>
-      Status: Checking preview…</div>
-      <button class="btn red" data-remove="${it.id}">Remove</button></div>`;
-    results.appendChild(card);
-    return {it,card};
-  });
-
-  cards.forEach(async ({it,card})=>{
-    const preview=await getUploadPreview(it);
-    const thumb=card.querySelector('.thumb'), meta=card.querySelector('.meta');
-
-    if(preview.kind==='image' && preview.url){
-      thumb.innerHTML=`<img src="${preview.url}" alt="${escapeHtml(it.file.name)}" title="${escapeHtml(preview.label)}">`;
-      meta.innerHTML=`Original: ${fmtBytes(it.file.size)}<br>
-        Type: ${escapeHtml(typeLabel(it))}<br>
-        MIME: ${escapeHtml(it.file.type||'unknown')}<br>
-        Status: <b>Preview ready</b>`;
-    }else{
-      thumb.innerHTML=`<div class="fileicon">${iconFor(it.file)}</div>`;
-      meta.innerHTML=`Original: ${fmtBytes(it.file.size)}<br>
-        Type: ${escapeHtml(typeLabel(it))}<br>
-        MIME: ${escapeHtml(it.file.type||'unknown')}<br>
-        Status: <b>Uploaded — preview not supported</b>`;
-    }
-  });
-
-  results.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{
-    const id=b.dataset.remove;
-    const cached=previewCache.get(id);
-    if(cached?.url) try{URL.revokeObjectURL(cached.url)}catch(e){}
-    previewCache.delete(id);
-    items=items.filter(x=>x.id!==id);
-    render();
-  });
+function render(){
+ if(!items.length){results.innerHTML='<div class="empty">No files selected yet.</div>';return}
+ results.innerHTML='';
+ items.forEach((it)=>{
+  const url=URL.createObjectURL(it.file),card=document.createElement('div');card.className='card';
+  const isVisual=/\.(jpe?g|png|webp|avif|bmp|gif|tiff?|svg|ico|heic|heif)$/i.test(it.file.name);
+  card.innerHTML=`<div class="thumb">${isVisual?`<img src="${url}" alt="" onerror="this.remove();this.parentNode.innerHTML='<div class=\\'fileicon\\'>${iconFor(it.file)}</div>'">`:`<div class="fileicon">${iconFor(it.file)}</div>`}</div>
+  <div class="cardbody"><div class="name">${escapeHtml(it.file.name)}</div>
+  <div class="meta">Original: ${fmtBytes(it.file.size)}<br>Type: ${escapeHtml(typeLabel(it.file))}<br>Status: Ready</div>
+  <button class="btn red" data-remove="${it.id}">Remove</button></div>`;
+  results.appendChild(card);
+ });
+ results.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{items=items.filter(x=>x.id!==b.dataset.remove);render()});
+ stats.innerHTML=`<div class="stat">Files: <b>${items.length}</b></div><div class="stat">Selected size: <b>${fmtBytes(items.reduce((a,x)=>a+x.file.size,0))}</b></div>`;
 }
 function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 
@@ -499,27 +417,15 @@ async function decodeSvg(file,scale){
  }finally{URL.revokeObjectURL(url)}
 }
 async function decodeAny(file){
-  const name=file.name.toLowerCase();
-  const mime=(file.type||'').toLowerCase();
-
-  if(/\.pdf$/.test(name)||mime==='application/pdf')
-    return {pages:await decodePdf(file),source:'PDF'};
-  if(/\.tiff?$/.test(name)||mime==='image/tiff')
-    return {pages:[await decodeTiff(file)],source:'TIFF'};
-  if(/\.heic$|\.heif$/.test(name)||mime==='image/heic'||mime==='image/heif')
-    return {pages:[await decodeHeic(file)],source:'HEIC/HEIF'};
-  if(/\.svg$/.test(name)||mime==='image/svg+xml')
-    return {pages:[await decodeSvg(file,+$('svgScale').value)],source:'SVG'};
-
-  // Do not depend on the extension: try the browser image decoder.
-  try{
-    const img=await imageFromBlob(file);
-    return {pages:[img],source:typeLabel(file)};
-  }catch(e){
-    if(mime.startsWith('image/'))
-      throw new Error('The browser recognizes this as an image, but could not decode its contents.');
-    throw new Error('This file format is not decodable by the current browser/available decoder.');
-  }
+ const name=file.name.toLowerCase();
+ if(/\.pdf$/.test(name)||file.type==='application/pdf')return {pages:await decodePdf(file),source:'PDF'};
+ if(/\.tiff?$/.test(name))return {pages:[await decodeTiff(file)],source:'TIFF'};
+ if(/\.heic$|\.heif$/.test(name))return {pages:[await decodeHeic(file)],source:'HEIC/HEIF'};
+ if(/\.svg$/.test(name))return {pages:[await decodeSvg(file,+$('svgScale').value)],source:'SVG'};
+ try{return {pages:[await imageFromBlob(file)],source:typeLabel(file)}}
+ catch(e){
+  throw new Error('This RAW or image format cannot be decoded by the current browser. Try converting the RAW file to DNG/JPG/PNG first, or use a browser with native RAW support.');
+ }
 }
 function toCanvas(source,w,h){
  const c=document.createElement('canvas');c.width=w;c.height=h;
@@ -942,12 +848,7 @@ $('zip').onclick=async()=>{
  const zip=new JSZip();converted.forEach(r=>zip.file(r.name,r.blob));
  const blob=await zip.generateAsync({type:'blob'});saveBlob(blob,'all-format-converted.zip');
 };
-$('clear').onclick=()=>{
-  previewCache.forEach(v=>{if(v?.url)try{URL.revokeObjectURL(v.url)}catch(e){}});
-  previewCache.clear();
-  items=[];converted=[];render();stats.innerHTML='';
-  $('progress').style.display='none';$('bar').style.width='0%';files.value='';
-};
+$('clear').onclick=()=>{items=[];converted=[];render();stats.innerHTML='';$('progress').style.display='none';$('bar').style.width='0%';files.value=''};
 render();
 </script>
 </body>
