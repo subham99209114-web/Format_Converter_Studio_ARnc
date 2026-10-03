@@ -24,75 +24,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script type="module">
-  // Browser-safe LibRaw bridge. The worker is same-origin (Blob URL), while
-  // the ESM LibRaw runtime and WASM binary are fetched from jsDelivr. This
-  // avoids both cross-origin Worker construction and Node/unenv builds.
-  window.ARncLibRawPromise = (async()=>{
-    const LIBRAW_JS = 'https://cdn.jsdelivr.net/npm/libraw-wasm@1.6.0/dist/libraw.js';
-    const LIBRAW_WASM = 'https://cdn.jsdelivr.net/npm/libraw-wasm@1.6.0/dist/libraw.wasm';
-    const workerSource = `
-      import LibRawModule from ${JSON.stringify(LIBRAW_JS)};
-      const WASM_URL = ${JSON.stringify(LIBRAW_WASM)};
-      let raw;
-      let ready;
-      async function init(){
-        ready = (async()=>{
-          const Module = await LibRawModule({ locateFile: (path) => WASM_URL });
-          raw = new Module.LibRaw();
-        })();
-        await ready;
-      }
-      init().catch(e => { self.__initError = String(e?.message || e); });
-      function transferables(v){
-        const a=[];
-        if(v && typeof v==='object'){
-          for(const k of Object.keys(v)){
-            const x=v[k];
-            if(ArrayBuffer.isView(x)) a.push(x.buffer);
-          }
-        }
-        return a;
-      }
-      self.onmessage = async (ev)=>{
-        const {id,fn,args=[]}=ev.data||{};
-        try{
-          if(self.__initError) throw new Error(self.__initError);
-          await ready;
-          const out = raw[fn](...args);
-          self.postMessage({id,out}, transferables(out));
-        }catch(e){
-          self.postMessage({id,error:String(e?.message || e || 'Unknown LibRaw error')});
-        }
-      };
-    `;
-    const workerURL = URL.createObjectURL(new Blob([workerSource], {type:'text/javascript'}));
-    class BrowserLibRaw {
-      constructor(){
-        this.worker = new Worker(workerURL,{type:'module'});
-        this.pending=new Map(); this.seq=0; this.tail=Promise.resolve(); this.disposed=false;
-        this.worker.onmessage=ev=>{
-          const d=ev.data||{}, slot=this.pending.get(d.id); if(!slot)return;
-          this.pending.delete(d.id); d.error ? slot.reject(new Error(d.error)) : slot.resolve(d.out);
-        };
-      }
-      call(fn,...args){
-        const exec=()=>new Promise((resolve,reject)=>{
-          if(this.disposed)return reject(new Error('LibRaw decoder disposed'));
-          const id=this.seq++; this.pending.set(id,{resolve,reject});
-          const transfers=[]; for(const a of args){ if(ArrayBuffer.isView(a)) transfers.push(a.buffer); else if(a instanceof ArrayBuffer) transfers.push(a); }
-          this.worker.postMessage({id,fn,args},transfers);
-        });
-        const r=this.tail.then(exec,exec); this.tail=r.then(()=>{},()=>{}); return r;
-      }
-      open(buffer,settings){return this.call('open',buffer,settings);}
-      imageData(){return this.call('imageData');}
-      thumbnailData(){return this.call('thumbnailData');}
-      dispose(){if(this.disposed)return; this.disposed=true; this.worker.terminate(); for(const x of this.pending.values())x.reject(new Error('LibRaw decoder disposed')); this.pending.clear();}
-    }
-    return BrowserLibRaw;
-  })();
-</script>
 
 <style>
 *{box-sizing:border-box}
@@ -180,8 +111,6 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
  header{padding:18px 22px}
  .panel{padding:18px 22px}
 }
-
-.dng-note{margin-top:8px;font-size:.82rem;opacity:.78}
 </style>
 </head>
 <body>
@@ -194,7 +123,7 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
  <span class="badge ok">AVIF</span><span class="badge">GIF</span><span class="badge">TIFF</span>
  <span class="badge">SVG</span><span class="badge">ICO</span><span class="badge">PDF</span>
  <span class="badge warn">HEIC / HEIF input</span><span class="badge warn">Any extension input</span><span class="badge warn">RAW input*</span>
-</div><div class="dng-note">DNG/RAW files are accepted and decoded with LibRaw-Wasm when available; the app falls back to embedded previews when full decoding is unavailable.</div>
+</div>
 </header>
 
 <div class="panel">
@@ -203,7 +132,7 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
  <h2>Choose Files</h2>
  <p>Any image format/extension can be selected. Browser-supported images, plus built-in TIFF/HEIC/SVG/PDF decoders, can be previewed and converted.</p>
  <label class="btn blue" for="files">📁 Choose Files</label>
- <input id="files" type="file" accept=".dng,image/x-adobe-dng,image/*,application/pdf,*/*" multiple>
+ <input id="files" type="file" accept="*/*" multiple>
  <small class="note">Upload is extension-independent. The app never rejects a file only because of its extension. Preview/conversion depends on the actual file data and the browser/decoder available for that format.</small>
 </div>
 
@@ -308,7 +237,7 @@ footer{padding:18px 28px;color:#cbd5e1;font-size:12px;border-top:1px solid var(-
 <p>PDF conversion is included as part of the studio. PDF input can be rendered in the browser and processed page by page, while image content can be placed into a PDF document. Users can choose common page sizes such as A4 or Letter, or use image-fitting options. PDF orientation can be automatic, portrait, or landscape. The resulting document is created on the client side using browser JavaScript. The exact visual result can depend on the source dimensions, page proportions, browser rendering, and selected quality settings.</p>
 <p>SVG processing is designed for situations where vector content needs to be converted into a raster image or PDF representation. The SVG scale option allows the rasterization size to be adjusted. Because SVG files can contain external resources, scripts, fonts, filters, and features with varying browser support, not every SVG document is guaranteed to render identically in every environment. The application therefore treats browser rendering as the basis for the conversion rather than promising identical results to every professional desktop graphics application.</p>
 <p>TIFF, HEIC, and HEIF are handled through browser-side decoding support and associated JavaScript libraries. TIFF decoding uses a browser-accessible TIFF decoder, while HEIC and HEIF input can use a browser-side conversion library when it is available. These formats can be computationally heavier than ordinary JPEG or PNG files, especially when files are large. Processing time may therefore increase with file size, image dimensions, device memory, and browser performance.</p>
-<p>RAW camera files require special attention. Camera RAW formats are not a single universal format; different manufacturers and camera models may use different containers, compression methods, metadata, and sensor characteristics. The website can recognize several common RAW file extensions, but actual decoding depends on the browser and available decoder support. The application uses a browser-side LibRaw decoder for common RAW/DNG files, but unusual, damaged, unsupported, or highly compressed RAW variants may still fail to decode. Where true sensor-level RAW processing is required, dedicated RAW software may be more appropriate.</p>
+<p>RAW camera files require special attention. Camera RAW formats are not a single universal format; different manufacturers and camera models may use different containers, compression methods, metadata, and sensor characteristics. The website can recognize several common RAW file extensions, but actual decoding depends on the browser and available decoder support. The application therefore does not promise that every RAW file will open successfully. Where true sensor-level RAW processing is required, dedicated RAW software may be more appropriate.</p>
 <p>The DNG output option should also be understood in context. The application can create an RGB-DNG-style output from decoded image data, but this is not equivalent to converting an original camera RAW sensor file into a fully metadata-preserving, sensor-native DNG. The source code itself identifies this limitation. Users who require professional camera metadata, original sensor data, color calibration information, or manufacturer-specific RAW characteristics should use specialized RAW conversion software.</p>
 <p>Batch processing is one of the central conveniences of the studio. Multiple selected files can be processed using the same conversion settings. A progress bar provides visual feedback while files are being processed. The application uses a small amount of controlled concurrency so that several files can be handled without attempting to process every file simultaneously. Actual performance varies according to file size, number of files, browser memory, processor speed, device type, and the complexity of each source format.</p>
 <p>After conversion, the results area shows information about each generated file, including dimensions, format, original size, final size, and the amount of reduction when applicable. Individual files can be downloaded using the Download button. The website also provides a ZIP option for downloading all converted files together. This can be particularly useful after batch conversion because it reduces the need to download many files separately. The ZIP package is assembled in the browser using JavaScript.</p>
@@ -423,136 +352,6 @@ function typeLabel(file){
 function iconFor(file){const t=typeLabel(file);return t==='PDF'?'📄':t==='RAW'?'📷':t==='HEIC/HEIF'?'🟦':t==='SVG'?'🔷':t==='TIFF'?'🖼️':'🖼️'}
 const previewCache=new Map();
 
-
-
-/* DNG support: many DNG files are TIFF containers and contain an embedded JPEG preview.
-   This parser extracts that preview without requiring native browser DNG decoding. */
-async function extractEmbeddedJpegFromDng(file){
-  const buf=await file.arrayBuffer();
-  const dv=new DataView(buf);
-  if(dv.byteLength<16) throw new Error('DNG file is too small.');
-  const little=dv.getUint16(0,false)===0x4949;
-  const u16=(o)=>dv.getUint16(o,little), u32=(o)=>dv.getUint32(o,little);
-  const first=u32(4), seen=new Set(), candidates=[];
-  const typeSize={1:1,2:1,3:2,4:4,5:8,6:1,7:1,8:2,9:4,10:8,11:4,12:8};
-  const readVals=(type,count,pos)=>{
-    const size=typeSize[type], vals=[];
-    if(!size) return vals;
-    for(let i=0;i<count;i++){
-      const q=pos+i*size;
-      if(q+size>dv.byteLength)break;
-      if(type===3) vals.push(u16(q));
-      else if(type===4) vals.push(u32(q));
-      else if([1,6,7].includes(type)) vals.push(dv.getUint8(q));
-    }
-    return vals;
-  };
-  function walk(ifd,depth=0){
-    if(!ifd||ifd<8||ifd>=dv.byteLength||depth>8||seen.has(ifd))return;
-    seen.add(ifd);
-    let count;try{count=u16(ifd)}catch(e){return}
-    if(count>512)return;
-    let jpegOff=null,jpegLen=null,stripOff=null,stripLen=null,subs=[];
-    for(let i=0;i<count;i++){
-      const e=ifd+2+i*12;if(e+12>dv.byteLength)break;
-      const tag=u16(e),type=u16(e+2),n=u32(e+4),size=typeSize[type];
-      if(!size)continue;
-      const total=size*n, pos=total<=4?e+8:u32(e+8);
-      if(pos<0||pos>=dv.byteLength)continue;
-      let v=[];try{v=readVals(type,n,pos)}catch(e){continue}
-      if(tag===513)jpegOff=v[0];
-      else if(tag===514)jpegLen=v[0];
-      else if(tag===273)stripOff=v[0];
-      else if(tag===279)stripLen=v[0];
-      else if(tag===330)subs=v;
-    }
-    if(jpegOff&&jpegLen&&jpegOff+jpegLen<=dv.byteLength)candidates.push([jpegOff,jpegLen,0]);
-    if(stripOff&&stripLen&&stripOff+stripLen<=dv.byteLength)candidates.push([stripOff,stripLen,1]);
-    subs.slice(0,32).forEach(x=>walk(x,depth+1));
-    try{const next=u32(ifd+2+count*12);if(next)walk(next,depth+1)}catch(e){}
-  }
-  walk(first);
-  for(const [off,len] of candidates.sort((a,b)=>a[2]-b[2])){
-    const bytes=new Uint8Array(buf,off,len);
-    let soi=-1,eoi=-1;
-    for(let i=0;i<Math.min(bytes.length,64)-1;i++)
-      if(bytes[i]===0xFF&&bytes[i+1]===0xD8){soi=i;break}
-    for(let i=bytes.length-2;i>=0;i--)
-      if(bytes[i]===0xFF&&bytes[i+1]===0xD9){eoi=i+2;break}
-    if(soi>=0){
-      if(eoi<0)eoi=bytes.length;
-      const jpg=bytes.slice(soi,eoi);
-      if(jpg.length>32)return new Blob([jpg],{type:'image/jpeg'});
-    }
-  }
-  throw new Error('No embedded JPEG preview found in this DNG.');
-}
-
-async function decodeDngWithLibRaw(file){
-  const LibRaw = await window.ARncLibRawPromise;
-  const raw = new LibRaw();
-  try {
-    const buffer = await file.arrayBuffer();
-    await raw.open(new Uint8Array(buffer), {
-      useCameraWb:true, outputColor:1, outputBps:8, userQual:3,
-      useFujiRotate:-1, useCameraMatrix:1
-    });
-    const rendered = await raw.imageData();
-    const data = rendered?.data || rendered?.image || rendered;
-    const width = Number(rendered?.width || rendered?.w || rendered?.cols);
-    const height = Number(rendered?.height || rendered?.h || rendered?.rows);
-    const colors = Number(rendered?.colors || rendered?.channels || 3);
-    if(!data || !width || !height) throw new Error('LibRaw returned no rendered RGB image.');
-    const src = data instanceof Uint8Array ? data : new Uint8Array(data);
-    const pixelCount=width*height;
-    const c=document.createElement('canvas'); c.width=width; c.height=height;
-    const ctx=c.getContext('2d',{willReadFrequently:true});
-    const rgba=new Uint8ClampedArray(pixelCount*4);
-    if(colors>=3){
-      for(let i=0,j=0,k=0;i<pixelCount;i++,j+=4,k+=colors){rgba[j]=src[k];rgba[j+1]=src[k+1];rgba[j+2]=src[k+2];rgba[j+3]=255;}
-    }else{
-      for(let i=0,j=0;i<pixelCount;i++,j+=4){const v=src[i];rgba[j]=rgba[j+1]=rgba[j+2]=v;rgba[j+3]=255;}
-    }
-    ctx.putImageData(new ImageData(rgba,width,height),0,0);
-    return c;
-  } finally { try{raw.dispose();}catch(_){} }
-}
-
-async function decodeDngWithEmbeddedPreview(file){
-  const jpg=await extractEmbeddedJpegFromDng(file);
-  const img=await imageFromBlob(jpg);
-  const c=document.createElement('canvas');
-  c.width=img.naturalWidth||img.width; c.height=img.naturalHeight||img.height;
-  c.getContext('2d').drawImage(img,0,0);
-  return c;
-}
-
-async function decodeDngForPreview(file){
-  // Real RAW/DNG decode first. Embedded JPEG is only a preview fallback.
-  try{
-    const canvas=await decodeDngWithLibRaw(file);
-    return await canvasToPreviewBlob(canvas);
-  }catch(e){
-    console.warn('LibRaw preview decode failed:',e);
-  }
-  try{return await extractEmbeddedJpegFromDng(file)}catch(e){}
-  const candidates=[
-    ()=>window.decodeDng&&window.decodeDng(file),
-    ()=>window.decodeRAW&&window.decodeRAW(file),
-    ()=>window.RawImage&&window.RawImage.decode?window.RawImage.decode(file):null
-  ];
-  for(const fn of candidates){
-    try{
-      const r=await fn(); if(!r)continue;
-      if(r instanceof Blob)return r;
-      if(r instanceof ImageBitmap)return await canvasToPreviewBlob(r);
-      if(r.canvas instanceof HTMLCanvasElement)return await canvasToPreviewBlob(r.canvas);
-      if(r instanceof HTMLCanvasElement)return await canvasToPreviewBlob(r);
-    }catch(e){}
-  }
-  throw new Error('RAW/DNG preview is not supported by the available decoder.');
-}
-
 async function getUploadPreview(it){
   if(previewCache.has(it.id)) return previewCache.get(it.id);
   const file=it.file, name=file.name.toLowerCase();
@@ -575,9 +374,6 @@ async function getUploadPreview(it){
       const c=await decodeTiff(file);
       blobForPreview=await canvasToPreviewBlob(c);
       result={kind:'image',url:URL.createObjectURL(blobForPreview),label:'TIFF preview'};
-    }else if(/\.dng$/i.test(name)||file.type==='image/x-adobe-dng'){
-      const b=await decodeDngForPreview(file);
-      result={kind:'image',url:URL.createObjectURL(b),label:'DNG embedded JPEG preview'};
     }else if(/\.heic$|\.heif$/.test(name)||file.type==='image/heic'||file.type==='image/heif'){
       const img=await decodeHeic(file);
       const c=document.createElement('canvas');
@@ -585,11 +381,8 @@ async function getUploadPreview(it){
       c.getContext('2d').drawImage(img,0,0);
       blobForPreview=await canvasToPreviewBlob(c);
       result={kind:'image',url:URL.createObjectURL(blobForPreview),label:'HEIC/HEIF preview'};
-    }else if(/\.(dng|crw|cr2|cr3|nef|arw|orf|rw2|raf|pef|srw|raw|nrw|srf|sr2|3fr|iiq|kdc|dcs|dcr|erf|mef|mrw|mos)$/i.test(name)){
-      const previewBlob = await decodeDngForPreview(file);
-      result={kind:'image',url:URL.createObjectURL(previewBlob),label:'LibRaw RAW/DNG preview'};
     }else{
-      // Try every remaining uploaded file as a normal browser image.
+      // Try every uploaded file as an image, regardless of extension.
       await imageFromBlob(file);
       result={kind:'image',url:URL.createObjectURL(file),label:'Browser image preview'};
     }
@@ -717,33 +510,8 @@ async function decodeAny(file){
     return {pages:[await decodeHeic(file)],source:'HEIC/HEIF'};
   if(/\.svg$/.test(name)||mime==='image/svg+xml')
     return {pages:[await decodeSvg(file,+$('svgScale').value)],source:'SVG'};
-  if(/\.dng$/i.test(name)||mime==='image/x-adobe-dng'){
-    try{
-      const c=await decodeDngWithLibRaw(file);
-      return {pages:[c],source:'DNG / RAW (LibRaw)'};
-    }catch(rawErr){
-      // Many DNG files contain a full-size JPEG preview even when their RAW
-      // compression is not supported by the browser-side LibRaw build.
-      try{
-        const c=await decodeDngWithEmbeddedPreview(file);
-        return {pages:[c],source:'DNG (embedded JPEG preview)'};
-      }catch(previewErr){
-        const msg=rawErr?.message||String(rawErr||'Unknown RAW decoder error');
-        throw new Error('DNG/RAW decoding failed: '+msg);
-      }
-    }
-  }
 
-  // RAW/DNG must be decoded by a RAW decoder, not by HTMLImageElement.
-  if(/\.(dng|crw|cr2|cr3|nef|arw|orf|rw2|raf|pef|srw|raw|nrw|srf|sr2|3fr|iiq|kdc|dcs|dcr|erf|mef|mrw|mos)$/i.test(name)){
-    try{
-      const c=await decodeDngWithLibRaw(file);
-      return {pages:[c],source:typeLabel(file)};
-    }catch(e){
-      throw new Error('RAW/DNG decoding failed: '+(e&&e.message?e.message:String(e||'LibRaw could not decode this file.')));
-    }
-  }
-  // Do not depend on the extension for ordinary browser-readable images.
+  // Do not depend on the extension: try the browser image decoder.
   try{
     const img=await imageFromBlob(file);
     return {pages:[img],source:typeLabel(file)};
